@@ -3,6 +3,7 @@
 # Makefile fragment for Broadcom 802.11 Networking Device Driver
 #
 # Copyright (c) 2010 Broadcom Corporation
+# Copyright (C) 2018 NVIDIA Corporation. All rights reserved.
 #
 
 ccflags-y += \
@@ -48,3 +49,5 @@ brcmfmac-$(CONFIG_DMI) += \
 		dmi.o
 brcmfmac-$(CPTCFG_BRCMFMAC_ANDROID) += \
 		android.o
+brcmfmac-$(CPTCFG_BRCMFMAC_NV_CUSTOM_FILES) +=\
+		nv_common.o
