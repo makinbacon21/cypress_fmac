@@ -42,7 +42,7 @@
 #include <linux/regulator/consumer.h>
 #endif /* CPTCFG_BRCMFMAC_ANDROID*/
 
-#ifdef CPTCFG_BRCM_NV_CUSTOM_FILES
+#ifdef CPTCFG_BRCMFMAC_NV_CUSTOM_FILES
 #include "nv_common.h"
 #endif /* CPTCFG_BRCM_NV_CUSTOM_FILES */
 
@@ -573,6 +573,7 @@ static int brcmf_common_pd_probe(struct platform_device *pdev)
 {
 	brcmf_dbg(INFO, "Enter\n");
 
+#ifndef CPTCFG_BRCMFMAC_NV_GPIO
 	brcmfmac_pdata = dev_get_platdata(&pdev->dev);
 
 	if (brcmfmac_pdata) {
@@ -603,6 +604,10 @@ static int brcmf_common_pd_probe(struct platform_device *pdev)
 		wifi_card_detect(true);
 #endif
 	}
+#else
+	setup_gpio(pdev, true);
+#endif /* CPTCFG_BRCMFMAC_NV_GPIO */
+
 	return 0;
 }
 
@@ -610,6 +615,7 @@ static int brcmf_common_pd_remove(struct platform_device *pdev)
 {
 	brcmf_dbg(INFO, "Enter\n");
 
+#ifndef CPTCFG_BRCMFMAC_NV_GPIO
 	if (brcmfmac_pdata && brcmfmac_pdata->power_off) {
 		brcmfmac_pdata->power_off();
 	} else if (wifi_regulator) {
@@ -622,6 +628,9 @@ static int brcmf_common_pd_remove(struct platform_device *pdev)
 		regulator_put(wifi_regulator);
 		wifi_regulator = NULL;
 	}
+#else
+	setup_gpio(pdev, false);
+#endif /* CPTCFG_BRCMFMAC_NV_GPIO */
 	return 0;
 }
 
@@ -638,7 +647,7 @@ static const struct of_device_id wifi_device_dt_match[] = {
 	{},
 };
 
-static struct platform_driver brcmf_platform_dev_driver = {
+static __refdata struct platform_driver brcmf_platform_dev_driver = {
 	.probe          = brcmf_common_pd_probe,
 	.remove         = brcmf_common_pd_remove,
 	.driver         = {
