@@ -26,6 +26,10 @@
  */
 struct brcmf_mp_global_t {
 	char	firmware_path[BRCMF_FW_ALTPATH_LEN];
+#ifdef CPTCFG_BRCMFMAC_NV_COUNTRY_CODE
+	int	n_country;
+	struct brcmf_fil_country_le *country_code_map;
+#endif /* CPTCFG_BRCMFMAC_NV_COUNTRY_CODE */
 };
 
 extern struct brcmf_mp_global_t brcmf_mp_global;
@@ -79,6 +83,11 @@ void brcmf_dmi_probe(struct brcmf_mp_device *settings, u32 chip, u32 chiprev);
 static inline void
 brcmf_dmi_probe(struct brcmf_mp_device *settings, u32 chip, u32 chiprev) {}
 #endif
+
+#ifdef CPTCFG_BRCMFMAC_NV_COUNTRY_CODE
+int wifi_platform_get_country_code_map(void);
+void wifi_platform_free_country_code_map(void);
+#endif /* CPTCFG_BRCMFMAC_NV_COUNTRY_CODE */
 
 u8 brcmf_map_prio_to_prec(void *cfg, u8 prio);
 
