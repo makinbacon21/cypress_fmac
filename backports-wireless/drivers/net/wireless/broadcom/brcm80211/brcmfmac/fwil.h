@@ -85,6 +85,8 @@
 #define BRCMF_C_SET_VAR				263
 #define BRCMF_C_SET_WSEC_PMK			268
 
+#define BRCMF_C_SET_IM_MODE			311
+
 #define BRCMF_FW_BADARG				2
 #define BRCMF_FW_UNSUPPORTED			23
 
