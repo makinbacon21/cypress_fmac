@@ -66,3 +66,10 @@ config BRCMFMAC_CARD_DETECT
 	  If you say Y here, specific wifi_card_detect() API will
 	  enable when platform_driver or power cycle on/off call.
 	  This feature indicate for specific(e.g. I.MX) kernel.
+
+config NV_CUSTOM_SYSFS_TEGRA
+	bool "Custom sysfs for Tegra platform"
+	depends on BRCMFMAC
+	default y
+	---help---
+	  Enable custom sysfs for Tegra platform.
