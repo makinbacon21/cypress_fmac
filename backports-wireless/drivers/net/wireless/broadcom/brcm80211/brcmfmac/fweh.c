@@ -1,6 +1,22 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2012 Broadcom Corporation
+<<<<<<< HEAD
+=======
+ * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+>>>>>>> 54c9a54 (Enable NvIDS feature in brcmfamc driver)
  */
 #include <linux/netdevice.h>
 
@@ -17,6 +33,9 @@
 #ifdef CPTCFG_BRCMFMAC_ANDROID
 #include "android.h"
 #endif
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+#include "nv_logger.h"
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
 
 /**
  * struct brcmf_fweh_queue_item - event item on event queue.
@@ -46,7 +65,7 @@ struct brcmf_fweh_event_name {
 	const char *name;
 };
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(CPTCFG_BRCMFMAC_NV_IDS)
 #define BRCMF_ENUM_DEF(id, val) \
 	{ val, #id },
 
@@ -108,7 +127,16 @@ static int brcmf_fweh_call_event_handler(struct brcmf_pub *drvr,
 
 		/* handle the event if valid interface and handler */
 		if (fweh->evt_handler[code])
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+		{
+			if (NV_FILELOG_ON())
+				write_log(code,
+					brcmf_fweh_event_name(code), emsg->addr);
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
 			err = fweh->evt_handler[code](ifp, emsg, data);
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+		}
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
 		else
 			bphy_err(drvr, "unhandled event %d ignored\n", code);
 	} else {

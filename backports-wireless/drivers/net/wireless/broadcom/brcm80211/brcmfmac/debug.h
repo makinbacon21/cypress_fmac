@@ -1,12 +1,31 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2010 Broadcom Corporation
+<<<<<<< HEAD
+=======
+ * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+>>>>>>> 54c9a54 (Enable NvIDS feature in brcmfamc driver)
  */
 
 #ifndef BRCMFMAC_DEBUG_H
 #define BRCMFMAC_DEBUG_H
 
 #include <linux/net.h>	/* net_ratelimit() */
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+#include "nv_logger.h"
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
 
 /* message levels */
 #define BRCMF_TRACE_VAL		0x00000002
@@ -43,14 +62,29 @@ void __brcmf_err(struct brcmf_bus *bus, const char *func, const char *fmt, ...);
  * messages are important to us.
  */
 #ifndef brcmf_err
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
 #define brcmf_err(fmt, ...)						\
 	do {								\
 		if (IS_ENABLED(CPTCFG_BRCMDBG) ||			\
 		    IS_ENABLED(CPTCFG_BRCM_TRACING) ||			\
 		    net_ratelimit())					\
 			__brcmf_err(NULL, __func__, fmt, ##__VA_ARGS__);\
+		nv_sprintf(fmt, ##__VA_ARGS__);				\
 	} while (0)
+#else
+#define brcmf_err(fmt, ...)						\
+	do {								\
+		if (IS_ENABLED(CPTCFG_BRCMDBG) ||			\
+		    IS_ENABLED(CPTCFG_BRCM_TRACING) ||			\
+		    net_ratelimit())					\
+			__brcmf_err(__func__, fmt, ##__VA_ARGS__);	\
+	} while (0)
+#endif /*CPTCFG_BRCMFMAC_NV_IDS */
 #endif
+
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+#define NV_FILELOG_ON()         (enable_file_logging)
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
 
 #define bphy_err(drvr, fmt, ...)					\
 	do {								\
@@ -60,6 +94,11 @@ void __brcmf_err(struct brcmf_bus *bus, const char *func, const char *fmt, ...);
 			wiphy_err((drvr)->wiphy, "%s: " fmt, __func__,	\
 				  ##__VA_ARGS__);			\
 	} while (0)
+#endif /*CPTCFG_BRCMFMAC_NV_IDS */
+
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+#define NV_FILELOG_ON()         (enable_file_logging)
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
 
 #if defined(DEBUG) || defined(CPTCFG_BRCM_TRACING)
 

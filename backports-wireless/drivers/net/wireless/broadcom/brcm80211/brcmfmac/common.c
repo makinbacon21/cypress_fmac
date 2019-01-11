@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2010 Broadcom Corporation
- * Copyright (C) 2018 NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2018-2019 NVIDIA Corporation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -44,6 +44,9 @@
 
 #ifdef CPTCFG_BRCMFMAC_NV_CUSTOM_FILES
 #include "nv_common.h"
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+#include "nv_logger.h"
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
 #endif /* CPTCFG_BRCM_NV_CUSTOM_FILES */
 
 MODULE_AUTHOR("Broadcom Corporation");
@@ -663,6 +666,10 @@ static int __init brcmfmac_module_init(void)
 {
 	int err;
 
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+	write_log_init();
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
+
 	/* Get the platform data (if available) for our devices */
 	err = platform_driver_probe(&brcmf_pd, brcmf_common_pd_probe);
 	if (err == -ENODEV)
@@ -703,6 +710,9 @@ static void __exit brcmfmac_module_exit(void)
 		platform_driver_unregister(&brcmf_platform_dev_driver);
 #endif /* CPTCFG_BRCMFMAC_ANDROID */
 	brcmf_core_exit();
+#ifdef CPTCFG_BRCMFMAC_NV_IDS
+	write_log_uninit();
+#endif /* CPTCFG_BRCMFMAC_NV_IDS */
 }
 
 module_init(brcmfmac_module_init);
