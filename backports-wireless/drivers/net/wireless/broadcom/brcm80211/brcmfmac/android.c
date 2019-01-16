@@ -1846,6 +1846,9 @@ int brcmf_android_attach(struct device *dev, struct brcmf_mp_device *settings)
 	android->drvr = drvr;
 	android->wiphy = drvr->wiphy;
 	android->wifi_on = true;
+#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
+	tegra_sysfs_on();
+#endif
 	android->wifi_reset = false;
 	android->init_done = false;
 	android->wakelock_counter = 0;
