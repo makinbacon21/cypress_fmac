@@ -248,6 +248,9 @@ void brcmf_del_sta(struct brcmf_if *ifp, const u8 *ea);
 struct brcmf_sta *brcmf_find_sta(struct brcmf_if *ifp, const u8 *ea);
 struct brcmf_sta *brcmf_findadd_sta(struct brcmf_if *ifp, const u8 *ea);
 int brcmf_set_country(struct net_device *ndev, char *country);
+int brcmf_start_mkeep_alive(struct net_device *ndev, u8 mkeep_alive_id,
+	u8 *ip_pkt, u16 ip_pkt_len, u8* src_mac, u8* dst_mac, u32 period_msec);
+int brcmf_stop_mkeep_alive(struct net_device *ndev, u8 mkeep_alive_id);
 #ifdef CPTCFG_BRCMFMAC_ANDROID
 int brcmf_set_power(bool on, unsigned long msec);
 void brcmf_wake_dev_reset_waitq(struct brcmf_pub *drvr, int status);
