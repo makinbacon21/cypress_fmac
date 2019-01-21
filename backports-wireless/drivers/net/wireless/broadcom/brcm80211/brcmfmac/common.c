@@ -252,10 +252,6 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
 	struct eventmsgs_ext *eventmask_msg = NULL;
 	u8 msglen;
 
-#ifdef CPTCFG_BRCMFMAC_NV_CUSTOM_MAC
-	nv_set_mac_address(ifp->ndev);
-#endif /* CPTCFG_BRCMFMAC_NV_CUSTOM_MAC */
-
 	err = brcmf_fil_iovar_data_get(ifp, "cur_etheraddr", ifp->mac_addr,
 				       sizeof(ifp->mac_addr));
 	if (err < 0) {
