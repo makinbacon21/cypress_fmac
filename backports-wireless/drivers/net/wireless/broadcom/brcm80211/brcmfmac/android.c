@@ -48,9 +48,6 @@
 #ifdef CPTCFG_BRCMFMAC_NV_PRIV_CMD
 #include "nv_common.h"
 #endif /* CPTCFG_BRCMFMAC_NV_PRIV_CMD */
-#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
-#include "nv_custom_sysfs_tegra.h"
-#endif /* CPTCFG_NV_CUSTOM_SYSFS_TEGRA */
 
 #define CMD_START		"START"
 #define CMD_STOP		"STOP"
@@ -244,9 +241,6 @@ int brcmf_android_wifi_on(struct brcmf_pub *drvr, struct net_device *ndev)
 			return ret;
 		}
 		android->wifi_on = true;
-#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
-		tegra_sysfs_on();
-#endif
 	}
 
 	return ret;
@@ -267,9 +261,6 @@ brcmf_android_wifi_off(struct brcmf_pub *drvr, struct net_device *ndev)
 	}
 
 	if (android->wifi_on) {
-#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
-		tegra_sysfs_off();
-#endif
 		if (android->init_done)
 			ret = brcmf_fil_cmd_int_set(ifp, BRCMF_C_DOWN, 1);
 		brcmf_set_power(false, 0);
@@ -1846,9 +1837,6 @@ int brcmf_android_attach(struct device *dev, struct brcmf_mp_device *settings)
 	android->drvr = drvr;
 	android->wiphy = drvr->wiphy;
 	android->wifi_on = true;
-#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
-	tegra_sysfs_on();
-#endif
 	android->wifi_reset = false;
 	android->init_done = false;
 	android->wakelock_counter = 0;

@@ -2267,6 +2267,12 @@ failed:
 	if (!ret)
 		android->enabled_ndev_num++;
 
+#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
+	if (ifp->bsscfgidx == 0) {
+		tegra_sysfs_on();
+	}
+#endif
+
 	brcmf_android_wake_unlock(drvr);
 
 	return ret;
@@ -2296,6 +2302,12 @@ int brcmf_android_netdev_stop(struct net_device *ndev)
 		brcmf_android_set_reset(ifp->drvr, true);
 		g_drvr = ifp->drvr;
 	}
+
+#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
+	if (ifp->bsscfgidx == 0) {
+		tegra_sysfs_off();
+	}
+#endif
 
 	brcmf_android_wake_unlock(drvr);
 
