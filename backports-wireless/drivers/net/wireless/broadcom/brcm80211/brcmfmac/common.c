@@ -540,9 +540,6 @@ struct brcmf_mp_device *brcmf_get_module_param(struct device *dev,
 #ifdef DEBUG
 	settings->ignore_probe_fail = !!brcmf_ignore_probe_fail;
 #endif
-#ifdef CPTCFG_BRCMFMAC_ANDROID
-	brcmf_mp_attach();
-#endif
 
 	if (bus_type == BRCMF_BUSTYPE_SDIO)
 		settings->bus.sdio.txglomsz = brcmf_sdiod_txglomsz;
@@ -585,7 +582,6 @@ static int brcmf_common_pd_probe(struct platform_device *pdev)
 {
 	brcmf_dbg(INFO, "Enter\n");
 
-#ifndef CPTCFG_BRCMFMAC_NV_GPIO
 	brcmfmac_pdata = dev_get_platdata(&pdev->dev);
 
 	if (brcmfmac_pdata) {
@@ -616,8 +612,9 @@ static int brcmf_common_pd_probe(struct platform_device *pdev)
 		wifi_card_detect(true);
 #endif
 	}
-#else
-	setup_gpio(pdev, true);
+
+#ifdef CPTCFG_BRCMFMAC_NV_GPIO
+	tegra_setup_gpio(pdev, true);
 #endif /* CPTCFG_BRCMFMAC_NV_GPIO */
 
 #ifdef CPTCFG_BRCMFMAC_NV_COUNTRY_CODE
@@ -631,7 +628,6 @@ static int brcmf_common_pd_remove(struct platform_device *pdev)
 {
 	brcmf_dbg(INFO, "Enter\n");
 
-#ifndef CPTCFG_BRCMFMAC_NV_GPIO
 	if (brcmfmac_pdata && brcmfmac_pdata->power_off) {
 		brcmfmac_pdata->power_off();
 	} else if (wifi_regulator) {
@@ -644,8 +640,8 @@ static int brcmf_common_pd_remove(struct platform_device *pdev)
 		regulator_put(wifi_regulator);
 		wifi_regulator = NULL;
 	}
-#else
-	setup_gpio(pdev, false);
+#ifdef CPTCFG_BRCMFMAC_NV_GPIO
+	tegra_setup_gpio(pdev, false);
 #endif /* CPTCFG_BRCMFMAC_NV_GPIO */
 
 #ifdef CPTCFG_BRCMFMAC_NV_COUNTRY_CODE

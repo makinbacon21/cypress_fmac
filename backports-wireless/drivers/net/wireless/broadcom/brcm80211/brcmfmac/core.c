@@ -2403,6 +2403,13 @@ int brcmf_set_power(bool on, unsigned long msec)
 				regulator_disable(wifi_regulator);
 				return -EIO;
 			}
+#ifdef CPTCFG_BRCMFMAC_NV_GPIO
+			/* Power on GPIO */
+			if (tegra_toggle_gpio(true, msec) < 0) {
+				regulator_disable(wifi_regulator);
+				return -EIO;
+			}
+#endif /* CPTCFG_BRCMFMAC_NV_GPIO */
 			msleep(msec);
 #if defined(CPTCFG_BRCMFMAC_SDIO) && defined(CPTCFG_BRCMFMAC_CARD_DETECT)
 			wifi_card_detect(true);
