@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2016 Broadcom
+ * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #ifndef _BRCMF_PNO_H
 #define _BRCMF_PNO_H
@@ -9,9 +22,19 @@
 #define BRCMF_PNO_MAX_PFN_COUNT			16
 #define BRCMF_PNO_SCHED_SCAN_MIN_PERIOD	10
 #define BRCMF_PNO_SCHED_SCAN_MAX_PERIOD	508
+#define BRCMF_PNO_MAX_BUCKETS		16
+
+#define PNO_OUI_LEN	3
+
+#define ifp_to_pno(_ifp)	((_ifp)->drvr->config->pno)
 
 /* forward declaration */
-struct brcmf_pno_info;
+struct brcmf_pno_info {
+	int n_reqs;
+	u8 pno_oui[PNO_OUI_LEN];
+	struct cfg80211_sched_scan_request *reqs[BRCMF_PNO_MAX_BUCKETS];
+	struct mutex req_lock;
+};
 
 /**
  * brcmf_pno_start_sched_scan - initiate scheduled scan on device.

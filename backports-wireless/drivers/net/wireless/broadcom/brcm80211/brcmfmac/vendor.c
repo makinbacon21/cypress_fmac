@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2014 Broadcom Corporation
+ * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <linux/vmalloc.h>
@@ -19,6 +32,9 @@
 #ifdef CPTCFG_BRCMFMAC_ANDROID
 #include "android.h"
 #include "bus.h"
+#ifdef CPTCFG_BRCMFMAC_NV_PRIV_CMD
+#include "nv_android.h"
+#endif /* CPTCFG_BRCMFMAC_NV_PRIV_CMD */
 #endif /* CPTCFG_BRCMFMAC_ANDROID */
 
 #if defined(CPTCFG_BRCMFMAC_ANDROID)
@@ -1062,6 +1078,80 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 			WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = brcmf_cfg80211_start_mkeep_alive
 	},
+#ifdef CPTCFG_BRCMFMAC_NV_PRIV_CMD
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = ANDR_WIFI_RANDOM_MAC_OUI
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_pno_mac_oui
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_GET_VER
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_get_ver
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_START_LOGGING
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_TRIGGER_MEM_DUMP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_GET_MEM_DUMP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_GET_RING_STATUS
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_GET_RING_DATA
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_GET_FEATURE
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_RESET_LOGGING
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+#endif /* CPTCFG_BRCMFMAC_NV_PRIV_CMD */
 	{
 		{
 			.vendor_id = GOOGLE_OUI,
@@ -1079,7 +1169,6 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.policy = VENDOR_CMD_RAW_DATA,
-		.doit = brcmf_cfg80211_andr_set_rand_mac_oui
 	},
 	{
 		{
@@ -1122,10 +1211,6 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.policy = VENDOR_CMD_RAW_DATA,
 		.doit = brcmf_cfg80211_andr_dbg_get_mem_dump
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
 			.subcmd = DEBUG_GET_VER
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |

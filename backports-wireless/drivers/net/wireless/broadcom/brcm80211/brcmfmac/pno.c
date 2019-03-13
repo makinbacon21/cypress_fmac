@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2016 Broadcom
+ * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <linux/netdevice.h>
 #include <linux/gcd.h>
@@ -25,17 +38,8 @@
 #define BRCMF_PNO_HIDDEN_BIT		2
 #define BRCMF_PNO_SCHED_SCAN_PERIOD	30
 
-#define BRCMF_PNO_MAX_BUCKETS		16
 #define GSCAN_BATCH_NO_THR_SET			101
 #define GSCAN_RETRY_THRESHOLD			3
-
-struct brcmf_pno_info {
-	int n_reqs;
-	struct cfg80211_sched_scan_request *reqs[BRCMF_PNO_MAX_BUCKETS];
-	struct mutex req_lock;
-};
-
-#define ifp_to_pno(_ifp)	((_ifp)->drvr->config->pno)
 
 static int brcmf_pno_store_request(struct brcmf_pno_info *pi,
 				   struct cfg80211_sched_scan_request *req)
