@@ -2255,9 +2255,6 @@ brcmf_pcie_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		kfree(fwreq);
 		goto fail_bus;
 	}
-#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
-		tegra_sysfs_bus_register(&pdev->dev);
-#endif
 	return 0;
 
 fail_bus:
@@ -2287,9 +2284,6 @@ brcmf_pcie_remove(struct pci_dev *pdev)
 	bus = dev_get_drvdata(&pdev->dev);
 	if (bus == NULL)
 		return;
-#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
-	tegra_sysfs_bus_unregister(&pdev->dev);
-#endif
 
 	devinfo = bus->bus_priv.pcie->devinfo;
 
