@@ -315,15 +315,18 @@ int brcmf_android_set_btcoexmode(struct net_device *ndev, char *command,
 
 	btcoex_mode = *(command + strlen(CMD_BTCOEXMODE) + 1) - '0';
 
-	if (btcoex_mode == 1) {
+	if (btcoex_mode == 0) {
 	/* Enable to BTCOEXMODE with DHCP setup */
 		ret = brcmf_crit_proto_start(ndev);
-	} else if (btcoex_mode == 0) {
+	} else if (btcoex_mode == 1) {
 	/* Disable to BTCOEXMODE with DHCP setup */
 		ret = brcmf_crit_proto_stop(ndev);
 	} else if (btcoex_mode == 2) {
 	/* Set the coex mode back to its default value (Post DHCP setup) */
 		ret = brcmf_crit_proto_stop(ndev);
+	} else if (btcoex_mode == 2) {
+		// TODO: Implement SENSE mode
+		ret = 0;
 	} else {
 		brcmf_err("unknown btcode mode(%d)\n", btcoex_mode);
 		ret = -EINVAL;
