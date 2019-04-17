@@ -1739,7 +1739,11 @@ void __exit brcmf_core_exit(void)
 		return;
 
 	g_drvr->android->deinit = true;
+#ifndef CPTCFG_BRCM_INSMOD_NO_FW
 	brcmf_remove_interface(g_drvr->iflist[0], false);
+#else
+		brcmf_remove_interface(drvr->iflist[i], true);
+#endif
 	brcmf_cfg80211_detach(g_drvr->config);
 	kfree(g_drvr->ops);
 	wiphy_free(g_drvr->wiphy);
