@@ -2548,12 +2548,6 @@ int brcmf_android_netdev_stop(struct net_device *ndev)
 	if (!drvr->android->wifi_on)
 		return 0;
 
-#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
-	if (ifp->bsscfgidx == 0) {
-		tegra_sysfs_off();
-	}
-#endif
-
 	brcmf_android_wake_lock(drvr);
 
 	ret = brcmf_netdev_stop(ndev);
@@ -2565,6 +2559,12 @@ int brcmf_android_netdev_stop(struct net_device *ndev)
 		brcmf_android_set_reset(ifp->drvr, true);
 		g_drvr = ifp->drvr;
 	}
+
+#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
+	if (ifp->bsscfgidx == 0) {
+		tegra_sysfs_off();
+	}
+#endif
 
 	brcmf_android_wake_unlock(drvr);
 
