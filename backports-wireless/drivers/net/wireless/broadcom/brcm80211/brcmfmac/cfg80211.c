@@ -7346,12 +7346,17 @@ static int brcmf_setup_ifmodes(struct wiphy *wiphy, struct brcmf_if *ifp)
 	p2p = brcmf_feat_is_enabled(ifp, BRCMF_FEAT_P2P);
 	rsdb = brcmf_feat_is_enabled(ifp, BRCMF_FEAT_RSDB);
 
-#ifdef CPTCFG_BRCMFMAC_ANDROID
-	if (brcmf_android_is_inited(ifp->drvr))
-		return 0;
+#ifdef CPTCFG_BRCM_INSMOD_NO_FW
+	/*
+	 * Check and free old iface combinations, before allocating
+	 * new iface combinations.
+	 */
+	if (wiphy->iface_combinations) {
+		for (i = 0; i < wiphy->n_iface_combinations; i++)
+			kfree(wiphy->iface_combinations[i].limits);
+		kfree(wiphy->iface_combinations);
+	}
 
-	p2p = true;
-	mbss = true;
 #endif
 	n_combos = 1 + !!(p2p && !rsdb) + !!mbss;
 	combo = kcalloc(n_combos, sizeof(*combo), GFP_KERNEL);
@@ -8219,6 +8224,7 @@ struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
 	 */
 	drvr->config = cfg;
 
+    wiphy->iface_combinations = NULL;
 	err = brcmf_setup_wiphy(wiphy, ifp);
 	if (err < 0)
 		goto priv_out;
@@ -8445,6 +8451,15 @@ struct brcmf_if *brcmf_cfg80211_register_if(struct device *dev,
 		err = -ENOMEM;
 		goto cfg_fail;
 	}
+<<<<<<< HEAD
+=======
+	wiphy->iface_combinations = NULL;
+	brcmf_setup_wiphy(wiphy, ifp);
+	wiphy->bands[NL80211_BAND_2GHZ] = &brcmf_def_band_2ghz;
+	drvr->android->wiphy = wiphy;
+
+	cfg = wiphy_priv(wiphy);
+>>>>>>> e301ad8 (Fix wrong wiphy iface combinations on INSMOD_NO_FW)
 	cfg->wiphy = wiphy;
 	cfg->pub = drvr;
 	cfg->pm_state = BRCMF_CFG80211_PM_STATE_RESUMED;
