@@ -1216,13 +1216,18 @@ brcmf_do_escan(struct brcmf_if *ifp, struct cfg80211_scan_request *request)
 	return err;
 }
 
+#define MAX_NUM_SCAN_FAILURE 3
+atomic_t num_scan_failure = ATOMIC_INIT(0);
 static s32
 brcmf_cfg80211_scan(struct wiphy *wiphy, struct cfg80211_scan_request *request)
 {
 	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
 	struct brcmf_pub *drvr = cfg->pub;
 	struct brcmf_cfg80211_vif *vif;
+	struct brcmf_cfg80211_info *cfg = wiphy_to_cfg(wiphy);
+	struct net_device *ndev = cfg_to_ndev(cfg);
 	s32 err = 0;
+	u32 driver_status = 0;
 
 	brcmf_dbg(TRACE, "Enter\n");
 	vif = container_of(request->wdev, struct brcmf_cfg80211_vif, wdev);
@@ -1289,10 +1294,21 @@ brcmf_cfg80211_scan(struct wiphy *wiphy, struct cfg80211_scan_request *request)
 	mod_timer(&cfg->escan_timeout,
 		  jiffies + msecs_to_jiffies(BRCMF_ESCAN_TIMER_INTERVAL_MS));
 
+    atomic_set(&num_scan_failure, 0);
+
 	return 0;
 
 scan_out:
 	bphy_err(drvr, "scan error (%d)\n", err);
+    atomic_inc(&num_scan_failure);
+    if (atomic_read(&num_scan_failure) >= MAX_NUM_SCAN_FAILURE) {
+        atomic_set(&num_scan_failure, 0);
+        brcmf_err("%s: consecutive scan failure, reset wifi to recover",
+                __func__);
+        brcmf_cfg80211_vndr_send_async_event(wiphy, ndev,
+            BRCM_VENDOR_EVENT_DRIVER_HANG, &driver_status,
+            sizeof(u32));
+    }
 	clear_bit(BRCMF_SCAN_STATUS_BUSY, &cfg->scan_status);
 	cfg->scan_request = NULL;
 	return err;
