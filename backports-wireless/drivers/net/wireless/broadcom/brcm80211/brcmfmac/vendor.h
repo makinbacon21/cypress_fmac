@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2014 Broadcom Corporation
+ * Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+ * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #ifndef _vendor_h_
@@ -66,6 +79,27 @@ struct brcmf_vndr_dcmd_hdr {
 	uint magic;
 };
 
+enum brcmf_vendor_event {
+	BRCM_VENDOR_EVENT_UNSPEC,
+	BRCM_VENDOR_EVENT_PRIV_STR,
+	GOOGLE_GSCAN_SIGNIFICANT_EVENT,
+	GOOGLE_GSCAN_GEOFENCE_FOUND_EVENT,
+	GOOGLE_GSCAN_BATCH_SCAN_EVENT,
+	GOOGLE_SCAN_FULL_RESULTS_EVENT,
+	GOOGLE_RTT_COMPLETE_EVENT,
+	GOOGLE_SCAN_COMPLETE_EVENT,
+	GOOGLE_GSCAN_GEOFENCE_LOST_EVENT,
+	GOOGLE_SCAN_EPNO_EVENT,
+	GOOGLE_DEBUG_RING_EVENT,
+	GOOGLE_FW_DUMP_EVENT,
+	GOOGLE_PNO_HOTSPOT_FOUND_EVENT,
+	GOOGLE_RSSI_MONITOR_EVENT,
+	GOOGLE_MKEEP_ALIVE_EVENT,
+	BRCM_VENDOR_EVENT_IDSUP_STATUS,
+	BRCM_VENDOR_EVENT_DRIVER_HANG,
+	BRCMF_VNDR_EVENT_LAST
+};
+
 /**
  * struct brcmf_pfn_macaddr_cfg - message header for PFN MAC address config
  *
@@ -92,6 +126,8 @@ s32 brcmf_wiphy_phy_temp_evt_handler(struct brcmf_if *ifp,
 				     void *data);
 #if defined(CPTCFG_BRCMFMAC_ANDROID)
 void brcmf_set_vndr_cmd(struct wiphy *wiphy);
+int brcmf_cfg80211_vndr_send_async_event(struct wiphy *wiphy,
+	struct net_device *dev, int event_id, const void  *data, int len);
 
 enum {
 	/* don't use 0 as a valid subcommand */
