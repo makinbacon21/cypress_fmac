@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2012 Broadcom Corporation
-<<<<<<< HEAD
-=======
  * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -16,7 +14,6 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
  * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
->>>>>>> 54c9a54 (Enable NvIDS feature in brcmfamc driver)
  */
 #include <linux/netdevice.h>
 
@@ -33,9 +30,9 @@
 #ifdef CPTCFG_BRCMFMAC_ANDROID
 #include "android.h"
 #endif
-#ifdef CPTCFG_BRCMFMAC_NV_IDS
-#include "nv_logger.h"
-#endif /* CPTCFG_BRCMFMAC_NV_IDS */
+#ifdef CPTCFG_NV_CUSTOM_SYSFS_TEGRA
+#include "nv_custom_sysfs_tegra.h"
+#endif /* CPTCFG_NV_CUSTOM_SYSFS_TEGRA */
 
 /**
  * struct brcmf_fweh_queue_item - event item on event queue.
@@ -133,6 +130,9 @@ static int brcmf_fweh_call_event_handler(struct brcmf_pub *drvr,
 				write_log(code,
 					brcmf_fweh_event_name(code), emsg->addr);
 #endif /* CPTCFG_BRCMFMAC_NV_IDS */
+#ifdef CPTCFG_NV_DEBUG
+			nv_debug_fwevents(ifp, emsg, data);
+#endif /*CPTCFG_NV_DEBUG */
 			err = fweh->evt_handler[code](ifp, emsg, data);
 #ifdef CPTCFG_BRCMFMAC_NV_IDS
 		}
