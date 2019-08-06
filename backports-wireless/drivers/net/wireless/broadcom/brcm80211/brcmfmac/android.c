@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: ISC
 /* Copyright 2017, Cypress Semiconductor Corporation or a subsidiary of
+ * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
+ *
  * Cypress Semiconductor Corporation. All rights reserved.
  * This software, including source code, documentation and related
  * materials ("Software"), is owned by Cypress Semiconductor
@@ -34,6 +36,8 @@
 #include <net/ndisc.h>
 #include <net/ipv6.h>
 #include <linux/ipv6.h>
+#include <linux/pci-aspm.h>
+#include <linux/pci.h>
 
 #include "core.h"
 #include "android.h"
@@ -44,6 +48,7 @@
 #include "vendor.h"
 #include "brcmu_utils.h"
 #include "brcmu_wifi.h"
+#include "nv_common.h"
 
 #ifdef CPTCFG_BRCMFMAC_NV_PRIV_CMD
 #include "nv_android.h"
@@ -262,7 +267,7 @@ static int brcmf_android_set_suspendmode(struct net_device *ndev,
 					 char *command, int total_len)
 {
 	int ret = 0;
-
+	struct pci_dev *pdev = NULL;
 #if !defined(CONFIG_HAS_EARLYSUSPEND)
 	int suspend_flag;
 
@@ -271,6 +276,15 @@ static int brcmf_android_set_suspendmode(struct net_device *ndev,
 	suspend_flag = *(command + strlen(CMD_SETSUSPENDMODE) + 1) - '0';
 	if (suspend_flag != 0 && suspend_flag != 1)
 		return -EINVAL;
+
+	pdev = tegra_get_pdev();
+	if (pdev) {
+		if (suspend_flag == 1)
+			pci_enable_link_state(pdev, PCIE_LINK_STATE_L1);
+		else
+			pci_disable_link_state(pdev, PCIE_LINK_STATE_L1);
+	} else
+		brcmf_info("%s pci_dev is null", __func__);
 
 	ret = brcmf_pktfilter_enable(ndev, (bool)suspend_flag);
 	if (ret)

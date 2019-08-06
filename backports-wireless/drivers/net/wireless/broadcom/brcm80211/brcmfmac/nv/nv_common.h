@@ -26,6 +26,7 @@ int nv_btcoex_get_btcparams(struct net_device *dev, char *command, int total_len
 int nv_btcoex_set_btcparams(struct net_device *dev, char *command, int total_len);
 int nv_android_mkeep_alive(struct net_device *dev, char *command, int total_len);
 #endif /*CPTCFG_BRCMFMAC_NV_PRIV_CMD */
+struct pci_dev *tegra_get_pdev(void);
 #ifdef CPTCFG_BRCMFMAC_NV_GPIO
 void tegra_setup_gpio(struct platform_device *pdev, bool on);
 int tegra_toggle_gpio(bool on, unsigned long msec);
