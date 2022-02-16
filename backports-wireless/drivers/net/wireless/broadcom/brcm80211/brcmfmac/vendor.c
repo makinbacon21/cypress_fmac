@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2014 Broadcom Corporation
- * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2019-2021 NVIDIA Corporation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -382,6 +382,7 @@ static int brcmf_cfg80211_start_mkeep_alive(struct wiphy *wiphy, struct wireless
 	u8 src_mac[ETH_ALEN];
 	u8 dst_mac[ETH_ALEN];
 	u32 period_msec = 0;
+	u16 ether_type = 0;
 	const struct nlattr *iter;
 	gfp_t kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
 
@@ -424,6 +425,9 @@ static int brcmf_cfg80211_start_mkeep_alive(struct wiphy *wiphy, struct wireless
 			case MKEEP_ALIVE_ATTRIBUTE_PERIOD_MSEC:
 				period_msec = nla_get_u32(iter);
 				break;
+			case MKEEP_ALIVE_ATTRIBUTE_ETHER_TYPE:
+				ether_type = nla_get_u16(iter);
+				break;
 			default:
 				brcmf_err("Unknown type: %d\n", type);
 				ret = -EINVAL;
@@ -438,7 +442,7 @@ static int brcmf_cfg80211_start_mkeep_alive(struct wiphy *wiphy, struct wireless
 	}
 
 	ret = brcmf_start_mkeep_alive(ndev, mkeep_alive_id, ip_pkt, ip_pkt_len, src_mac,
-		dst_mac, period_msec);
+		dst_mac, period_msec, ether_type);
 	if (ret < 0) {
 		brcmf_err("start_mkeep_alive is failed ret: %d\n", ret);
 	}
@@ -1177,6 +1181,70 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 		{
 			.vendor_id = GOOGLE_OUI,
 			.subcmd = DEBUG_RESET_LOGGING
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = ANDR_WIFI_SUBCMD_TX_PWR_SCENARIO
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = WIFI_SUBCMD_SET_LATENCY_MODE
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_SET_HAL_PID
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_GET_WAKE_REASON_STATS
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = ANDR_WIFI_SUBCMD_TX_PWR_SCENARIO
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = WIFI_SUBCMD_SET_LATENCY_MODE
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_SET_HAL_PID
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_unsupported_feature
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_GET_WAKE_REASON_STATS
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_unsupported_feature
