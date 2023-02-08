@@ -32,6 +32,10 @@ static inline u64 ktime_get_boottime_ns(void)
 
 #if LINUX_VERSION_IS_LESS(4,18,0)
 extern time64_t ktime_get_boottime_seconds(void);
+static inline void ktime_get_boottime_ts64(struct timespec64 *ts)
+{
+	*ts = ktime_to_timespec64(ktime_get_boottime());
+}
 #endif /* < 4.18 */
 
 #if LINUX_VERSION_IS_LESS(3,19,0)
