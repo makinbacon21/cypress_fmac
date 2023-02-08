@@ -3,77 +3,41 @@ Cypress Wifi Android FMAC Driver Package - README
 
 Package FMAC Version
 --------------------
-v5.4.18-gamera-android-2
+v5.4.18-gamera-android-2 (MODIFIED)
 
 Package Android Version
 -----------------------
-Android 10.0.0-2.0.0
+>= Android 10
 
 Release Date
 ------------
 2021-01-20
+Last Modified: 2023-02-07
 
 Description
 -----------
 This is Cypress's Android brcmfmac driver and firmware support package.
 Brcmfmac is an open-source driver project.
 
-The release package includes:
+The pushed driver package includes:
 * backports-wireless
 	FMAC wireless backports source code
-* cypress-fmac-patches
-	FMAC Android wireless backports patches
-* firmware:
-	1. 43455 Firmware/clm_blob files
-		Version: 7.45.230
-	2. 4354  Firmware/clm_blob files
-		Version: 7.35.349.92
-	3. 43012 Firmware/clm_blob files
-		Version: 13.10.271.261
-	4. 4356  Firmware/clm_blob files
-		Version: 7.35.180.197
-	5. 54591/89459 Firmware/clm_blob files
-		Version: 13.35.213
-* nvram:
-	1. bcm94345wlpagb_p2xx
-	2. 43012 Rev C0 WLCSP Murata module EVB
-	3. BCM94354 WLBGA iPA, eLNA+switch board with SDIO for production package
-	4. CYW4356 1CX WLCSP module for iPA, eLNA board with PCIE for production package 
-	5. CYW954591 WLBGA iPA, iLNA board
-* aosp-patches:
-	Android Open Source Project (AOSP) patches
-* utilities:
-	wl debugging tool for ARM 32/64 bit.
-* build.sh
-	The script is for the integration of i.MX8MQ Android build
-* 3rd-party
-        1. Cirrent Agent 1.50
+* Android.mk
+    Makefile for Android trees (Credit `Aaron Kling <webgeek1234@gmail.com>`)
 * README
 
 Test Environment
 ----------------
-* ARM64 (IMX8MQ)
-   * Android 10.0.0-2.0.0
+* ARM64 (NVIDIA Tegra X1)
+   * Android 11/LineageOS 18.1
 
 Instructions
 ------------
-1. Extract the release package and move cypress folder to $ANDROID_BUILD_TOP/vendor/.
+1. Clone into kernel/nvidia/cypress-fmac-upstream
 
-2. Apply or porting the Android patches in $ANDROID_BUILD_TOP/vendor/cypress/aosp-patches.
+2. Add references to device.mk
 
-3. Follow build steps in NXP Android_User's_Guide.pdf.
-   We build FMAC modules in imx-make.sh because Google started to put a limit on the host tools
-   used when compiling Android code from Android 10.0, and host tools for building FMAC modules
-   now cannot be used in the Android build system.
-	$ source build/envsetup.sh
-	$ lunch evk_8mq-userdebug
-	$ ./imx-make.sh
-
-4. Re-flash following images in $OUT folder
-	a. boot.img
-	b. dtbo-imx8mq.img
-	c. vbmeta-imx8mq.img
-	d. super.img
+3. Build AOSP
 
 Remark
 ------
@@ -96,5 +60,3 @@ A4: Execute "adb disable-verity" with adb version 1.0.39 or later version, then 
 Q5: I cannot find my device in "adb devices"
 A5: Please execute adb daemon as root permission.
 	Execute "adb kill-server; sudo adb devices", then you can execute "adb devices" to check.
-
-
