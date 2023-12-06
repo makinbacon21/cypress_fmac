@@ -295,7 +295,7 @@ static int brcmf_android_set_suspendmode(struct net_device *ndev,
 }
 
 static int brcmf_android_set_country(struct net_device *ndev, char *command,
-				     int total_len)
+				     int total_len, bool nv_cmd)
 {
 #if defined(CPTCFG_BRCMFMAC_ANDROID)
 	struct brcmf_if *ifp =  netdev_priv(ndev);
@@ -303,7 +303,7 @@ static int brcmf_android_set_country(struct net_device *ndev, char *command,
 	struct brcmf_android *android = drvr->android;
 #endif
 #ifdef CPTCFG_BRCMFMAC_NV_COUNTRY_CODE
-	char *country_code = command + strlen(CMD_NV_COUNTRY) + 1;
+	char *country_code = command + strlen(nv_cmd ? CMD_NV_COUNTRY : CMD_COUNTRY) + 1;
 #else
 	char *country_code = command + strlen(CMD_COUNTRY) + 1;
 #endif /* CPTCFG_BRCMFMAC_NV_COUNTRY_CODE */
@@ -1627,16 +1627,14 @@ brcmf_handle_private_cmd(struct brcmf_pub *drvr, struct net_device *ndev,
 						  priv_cmd.total_len);
 	} else if (strncasecmp(command, CMD_COUNTRY,
 			       strlen(CMD_COUNTRY)) == 0) {
-#ifndef CPTCFG_BRCMFMAC_NV_COUNTRY_CODE
 		bytes_written =
 		    brcmf_android_set_country(ndev, command,
-					      priv_cmd.total_len);
-#else
-		bytes_written = 0;
+					      priv_cmd.total_len, false);
+#ifdef CPTCFG_BRCMFMAC_NV_COUNTRY_CODE
 	} else if (strncmp(command, CMD_NV_COUNTRY, strlen(CMD_NV_COUNTRY)) == 0) {
 		bytes_written =
 			brcmf_android_set_country(ndev, command,
-						priv_cmd.total_len);
+						priv_cmd.total_len, true);
 #endif /* CPTCFG_BRCMFMAC_NV_COUNTRY_CODE */
 	} else if (strncasecmp(command, CMD_BTCOEXMODE,
 		   strlen(CMD_BTCOEXMODE)) == 0) {
