@@ -1303,12 +1303,6 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 	{
 		{
 			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_GET_MEM_DUMP
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.policy = VENDOR_CMD_RAW_DATA,
-		.doit = brcmf_cfg80211_andr_dbg_get_mem_dump
 			.subcmd = DEBUG_GET_VER
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
