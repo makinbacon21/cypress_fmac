@@ -1,0 +1,141 @@
+From 445808c5e9a2cbab7bfcf649d882bfd55928e2b5 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Wed, 8 Jul 2020 00:57:27 -0500
+Subject: [PATCH 1/2] Add Cypress FMAC support in NXP Android-10.0.0_2.0.0 on
+ i.MX8MQ platform
+
+Add Cypress FMAC support in NXP Android-10.0.0_2.0.0 on i.MX8MQ platform.
+The patch includes following chip supports.
+	1. 43455 Wi-Fi chip with SDIO bus
+	2. 4354  Wi-Fi chip with SDIO bus
+	3. 43012 Wi-Fi chip with SDIO bus
+	4. 4356  Wi-Fi chip with PCIE bus
+	5. 54591 Wi-Fi chip with PCIE bus
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ common/imx_path/ImxPathConfig.mk              |  2 ++
+ common/tools/imx-make.sh                      |  3 +++
+ imx8m/evk_8mq/BoardConfig.mk                  |  6 +++---
+ imx8m/evk_8mq/SharedBoardConfig.mk            |  6 ++++--
+ imx8m/evk_8mq/early.init.cfg                  |  3 ++-
+ imx8m/evk_8mq/evk_8mq.mk                      | 21 ++++++++++++++++---
+ .../base/core/res/res/values/config.xml       |  3 +++
+ 7 files changed, 35 insertions(+), 9 deletions(-)
+
+diff --git a/common/imx_path/ImxPathConfig.mk b/common/imx_path/ImxPathConfig.mk
+index e0693010..8b9e57b0 100644
+--- a/common/imx_path/ImxPathConfig.mk
++++ b/common/imx_path/ImxPathConfig.mk
+@@ -26,3 +26,5 @@ IMX_MKIMAGE_PATH := vendor/nxp-opensource
+ IMX_PATH := vendor/nxp-opensource
+ FSL_IMX_DEMO_PATH := vendor/nxp-opensource
+ LIBDRM_IMX := vendor/nxp-opensource
++
++WIFI_VENDOR_CYPRESS_PATH := vendor/cypress
+diff --git a/common/tools/imx-make.sh b/common/tools/imx-make.sh
+index 7c38dac0..76f60e21 100755
+--- a/common/tools/imx-make.sh
++++ b/common/tools/imx-make.sh
+@@ -122,6 +122,9 @@ soc_path=${soc_path} product_path=${product_path} fsl_git_path=${fsl_git_path} c
+     make -C ./ -f ${fsl_git_path}/common/build/Makefile ${parallel_option} \
+     ${build_bootloader} ${build_kernel} ${build_galcore} </dev/null || exit
+ 
++# Build Cypress FMAC backports modules
++sh vendor/cypress/build.sh vendor/cypress/backports-wireless $OUT/obj/KERNEL_OBJ/ arm64 aarch64-linux-android- aarch64-linux-gnu-
++
+ if [ ${build_android_flag} -eq 1 ]; then
+     # source envsetup.sh before building Android rootfs, the time spent on building uboot/kernel
+     # before this does not count in the final result
+diff --git a/imx8m/evk_8mq/BoardConfig.mk b/imx8m/evk_8mq/BoardConfig.mk
+index b19aa5ed..413e6de4 100644
+--- a/imx8m/evk_8mq/BoardConfig.mk
++++ b/imx8m/evk_8mq/BoardConfig.mk
+@@ -75,9 +75,9 @@ BOARD_HOSTAPD_DRIVER         := NL80211
+ BOARD_HOSTAPD_PRIVATE_LIB           := lib_driver_cmd_$(BOARD_WLAN_DEVICE)
+ BOARD_WPA_SUPPLICANT_PRIVATE_LIB    := lib_driver_cmd_$(BOARD_WLAN_DEVICE)
+ 
+-WIFI_DRIVER_FW_PATH_PARAM := "/sys/module/brcmfmac/parameters/alternative_fw_path"
+-
+-#WIFI_HIDL_FEATURE_DUAL_INTERFACE := true
++WIFI_DRIVER_FW_PATH_PARAM      := "/sys/module/brcmfmac/parameters/alternative_fw_path"
++CY_WIFI_BACKPORT_SRC_PATH      := $(WIFI_VENDOR_CYPRESS_PATH)/backports-wireless
++WIFI_HIDL_FEATURE_DUAL_INTERFACE := true
+ 
+ BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := $(IMX_DEVICE_PATH)/bluetooth
+ 
+diff --git a/imx8m/evk_8mq/SharedBoardConfig.mk b/imx8m/evk_8mq/SharedBoardConfig.mk
+index 98fc2d66..c3a193d7 100644
+--- a/imx8m/evk_8mq/SharedBoardConfig.mk
++++ b/imx8m/evk_8mq/SharedBoardConfig.mk
+@@ -9,8 +9,10 @@ PRODUCT_IMX_TRUSTY := true
+ 
+ # BCM fmac wifi driver module
+ BOARD_VENDOR_KERNEL_MODULES += \
+-    $(KERNEL_OUT)/drivers/net/wireless/broadcom/brcm80211/brcmfmac/brcmfmac.ko \
+-    $(KERNEL_OUT)/drivers/net/wireless/broadcom/brcm80211/brcmutil/brcmutil.ko
++$(CY_WIFI_BACKPORT_SRC_PATH)/compat/compat.ko \
++$(CY_WIFI_BACKPORT_SRC_PATH)/net/wireless/cfg80211.ko \
++$(CY_WIFI_BACKPORT_SRC_PATH)/drivers/net/wireless/broadcom/brcm80211/brcmutil/brcmutil.ko \
++$(CY_WIFI_BACKPORT_SRC_PATH)/drivers/net/wireless/broadcom/brcm80211/brcmfmac/brcmfmac.ko
+ 
+ # mipi-panel touch driver module
+ BOARD_VENDOR_KERNEL_MODULES += \
+diff --git a/imx8m/evk_8mq/early.init.cfg b/imx8m/evk_8mq/early.init.cfg
+index 7403f68b..78c1f391 100644
+--- a/imx8m/evk_8mq/early.init.cfg
++++ b/imx8m/evk_8mq/early.init.cfg
+@@ -1,4 +1,5 @@
++insmod vendor/lib/modules/compat.ko
++insmod vendor/lib/modules/cfg80211.ko
+ insmod vendor/lib/modules/brcmutil.ko
+ insmod vendor/lib/modules/brcmfmac.ko
+-insmod vendor/lib/modules/wlan.ko
+ insmod vendor/lib/modules/synaptics_dsx_i2c.ko
+diff --git a/imx8m/evk_8mq/evk_8mq.mk b/imx8m/evk_8mq/evk_8mq.mk
+index f4fdafd8..ced5685d 100644
+--- a/imx8m/evk_8mq/evk_8mq.mk
++++ b/imx8m/evk_8mq/evk_8mq.mk
+@@ -255,9 +255,24 @@ PRODUCT_COPY_FILES += \
+ 
+ # BCM 1CX Wifi Firmware
+ PRODUCT_COPY_FILES += \
+-    vendor/nxp/imx-firmware/cyw-wifi-bt/1CX_CYW4356/brcmfmac4356-pcie.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4356-pcie.bin \
+-    vendor/nxp/imx-firmware/cyw-wifi-bt/1CX_CYW4356/brcmfmac4356-pcie.clm_blob:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4356-pcie.clm_blob \
+-    vendor/nxp/imx-firmware/cyw-wifi-bt/1CX_CYW4356/brcmfmac4356-pcie.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4356-pcie.txt
++    vendor/cypress/firmware/brcmfmac4356-pcie.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4356-pcie.bin \
++    vendor/cypress/firmware/brcmfmac4356-pcie.clm_blob:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4356-pcie.clm_blob \
++    vendor/cypress/nvram/brcmfmac4356-pcie.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4356-pcie.txt \
++    vendor/cypress/firmware/brcmfmac54591-pcie.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac54591-pcie.bin \
++    vendor/cypress/firmware/brcmfmac54591-pcie.clm_blob:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac54591-pcie.clm_blob \
++    vendor/cypress/nvram/brcmfmac54591-pcie.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac54591-pcie.txt \
++    vendor/cypress/firmware/brcmfmac54591-pcie.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac89459-pcie.bin \
++    vendor/cypress/firmware/brcmfmac54591-pcie.clm_blob:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac89459-pcie.clm_blob \
++    vendor/cypress/nvram/brcmfmac54591-pcie.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac89459-pcie.txt \
++    vendor/cypress/firmware/brcmfmac43455-sdio.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac43455-sdio.bin \
++    vendor/cypress/firmware/brcmfmac43455-sdio.clm_blob:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac43455-sdio.clm_blob \
++    vendor/cypress/nvram/brcmfmac43455-sdio.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac43455-sdio.txt \
++    vendor/cypress/firmware/brcmfmac4354-sdio.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4354-sdio.bin \
++    vendor/cypress/firmware/brcmfmac4354-sdio.clm_blob:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4354-sdio.clm_blob \
++    vendor/cypress/nvram/brcmfmac4354-sdio.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac4354-sdio.txt \
++    vendor/cypress/firmware/brcmfmac43012-sdio.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac43012-sdio.bin \
++    vendor/cypress/firmware/brcmfmac43012-sdio.clm_blob:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac43012-sdio.clm_blob \
++    vendor/cypress/nvram/brcmfmac43012-sdio.txt:$(TARGET_COPY_OUT_VENDOR)/firmware/brcm/brcmfmac43012-sdio.txt
+ 
+ # hardware backed keymaster service
+ ifeq ($(PRODUCT_IMX_TRUSTY),true)
+diff --git a/imx8m/evk_8mq/overlay/frameworks/base/core/res/res/values/config.xml b/imx8m/evk_8mq/overlay/frameworks/base/core/res/res/values/config.xml
+index 51378fe6..120e406d 100644
+--- a/imx8m/evk_8mq/overlay/frameworks/base/core/res/res/values/config.xml
++++ b/imx8m/evk_8mq/overlay/frameworks/base/core/res/res/values/config.xml
+@@ -193,4 +193,7 @@
+ 
+     <!-- If the system has the input method for each display - enable per-display focus. -->
+     <bool name="config_perDisplayFocusEnabled">true</bool>
++
++	<bool translatable="false" name="config_wifi_connected_mac_randomization_supported">true</bool>
++	<bool translatable="false" name="config_wifi_p2p_mac_randomization_supported">true</bool>
+ </resources>
+-- 
+2.25.0
+

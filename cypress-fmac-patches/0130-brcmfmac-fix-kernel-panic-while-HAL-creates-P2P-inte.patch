@@ -1,0 +1,36 @@
+From de98449dbb469579edea81258e25536bf76bb790 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Mon, 5 Oct 2020 04:05:48 -0500
+Subject: [PATCH 130/130] brcmfmac: fix kernel panic while HAL creates P2P
+ interface in off state
+
+To avoid null pointer dereference when HAL creates P2P device interface
+during wifi off state, we should return IO error without handling the
+creating process.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c    | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index ed3865b2fa93..1f3e5c761e0e 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -647,6 +647,13 @@ static struct wireless_dev *brcmf_cfg80211_add_iface(struct wiphy *wiphy,
+ 	struct brcmf_cfg80211_vif *vif_walk;
+ 
+ 	brcmf_dbg(TRACE, "enter: %s type %d\n", name, type);
++
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	if (brcmf_android_in_reset(drvr)) {
++		brcmf_err("device is in reset, return -EIO\n");
++		return ERR_PTR(-EIO);
++	}
++#endif
+ 	err = brcmf_vif_add_validate(wiphy_to_cfg(wiphy), type);
+ 	if (err) {
+ 		bphy_err(drvr, "iface validation failed: err=%d\n", err);
+-- 
+2.25.0
+

@@ -1,0 +1,36 @@
+From 80eda3a3d9d31c438228f8d16e21fc377068e6de Mon Sep 17 00:00:00 2001
+From: Able Liao <Able.Liao@cypress.com>
+Date: Thu, 20 Feb 2020 15:49:23 +0800
+Subject: [PATCH 095/130] brcmfmac: do not disconnect for disassoc frame from
+ unconnected AP
+
+Ignore FW event if the event's BSSID is different form the BSSID of the
+currently connected AP. Check interface state is connected or not, if
+state is not connected that can ignore link down event.
+
+Signed-off-by: Able Liao <Able.Liao@cypress.com>
+---
+ .../net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c    | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index d5a21b6c100c..e6293809e297 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -6134,7 +6134,12 @@ brcmf_notify_connect_status(struct brcmf_if *ifp,
+ 		brcmf_net_setcarrier(ifp, true);
+ 	} else if (brcmf_is_linkdown(e)) {
+ 		brcmf_dbg(CONN, "Linkdown\n");
+-		if (!brcmf_is_ibssmode(ifp->vif)) {
++		if (!brcmf_is_ibssmode(ifp->vif) &&
++		    test_bit(BRCMF_VIF_STATUS_CONNECTED,
++			     &ifp->vif->sme_state)) {
++			if (memcmp(profile->bssid, e->addr, ETH_ALEN))
++				return err;
++
+ 			brcmf_bss_connect_done(cfg, ndev, e, false);
+ 			brcmf_link_down(ifp->vif,
+ 					brcmf_map_fw_linkdown_reason(e),
+-- 
+2.25.0
+

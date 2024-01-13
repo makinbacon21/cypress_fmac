@@ -1,0 +1,590 @@
+From fa0536b6a86c32dedd30b81f575fbe8bc255e40a Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Wed, 5 Aug 2020 21:27:58 -0500
+Subject: [PATCH 129/130] brcmfmac: add wake reason stats support to fix VTS
+ failed
+
+In Android VTS, we need to support getting debugging host wakeup
+reason stats, so we add this feature support in Android build.
+
+Verified: VTS test case (GetDebugHostWakeReasonStats)
+Verified: Check Wlan Wake Reasons in wifi service dump
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+
+---
+ .../broadcom/brcm80211/brcmfmac/android.c     | 102 +++++++++++++++++-
+ .../broadcom/brcm80211/brcmfmac/android.h     |  31 +++++-
+ .../broadcom/brcm80211/brcmfmac/bcmsdh.c      |   2 +
+ .../broadcom/brcm80211/brcmfmac/bus.h         |   1 +
+ .../broadcom/brcm80211/brcmfmac/core.c        |  17 ++-
+ .../broadcom/brcm80211/brcmfmac/fweh.c        |   7 ++
+ .../broadcom/brcm80211/brcmfmac/pcie.c        |  24 ++++-
+ .../broadcom/brcm80211/brcmfmac/sdio.c        |  16 ++-
+ .../broadcom/brcm80211/brcmfmac/vendor.c      |  72 ++++++++++++-
+ .../broadcom/brcm80211/brcmfmac/vendor.h      |  24 +++++
+ 10 files changed, 278 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+index 364a0957aa3e..202a31726673 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+@@ -31,6 +31,10 @@
+ #include <linux/mmc/card.h>
+ #include <defs.h>
+ #include <brcmu_utils.h>
++#include <net/ndisc.h>
++#include <net/ipv6.h>
++#include <linux/ipv6.h>
++
+ #include "core.h"
+ #include "android.h"
+ #include "cfg80211.h"
+@@ -1751,6 +1755,13 @@ int brcmf_android_attach(struct device *dev, struct brcmf_mp_device *settings)
+ 	}
+ 	drvr = ifp->drvr;
+ 
++	if (brcmf_android_is_attached(drvr)) {
++		memset(drvr->android->wake_cnts, 0,
++		       sizeof(*drvr->android->wake_cnts));
++		brcmf_android_set_wake_flag(drvr, 0);
++		return 0;
++	}
++
+ 	android = kzalloc(sizeof(*android), GFP_KERNEL);
+ 	if (!android)
+ 		return -ENOMEM;
+@@ -1768,6 +1779,8 @@ int brcmf_android_attach(struct device *dev, struct brcmf_mp_device *settings)
+ 	brcmf_wake_lock_init(&android->wakelock, "brcm_wlan_wake");
+ 	brcmf_wake_lock_init(&android->rx_wakelock, "brcm_wlan_rxwake");
+ 	spin_lock_init(&android->wakelock_spinlock);
++	android->wake_cnts = kzalloc(sizeof(*android->wake_cnts), GFP_KERNEL);
++	android->wake_info = kzalloc(sizeof(*android->wake_info), GFP_KERNEL);
+ 	drvr->android = android;
+ 
+ 	brcmf_android_set_reset(drvr, true);
+@@ -1789,7 +1802,9 @@ int brcmf_android_detach(struct brcmf_pub *drvr)
+ 	__pm_relax(&android->wakelock);
+ 	wakeup_source_remove(&android->rx_wakelock);
+ 	__pm_relax(&android->rx_wakelock);
+-	kfree(drvr->android);
++	kfree(android->wake_cnts);
++	kfree(android->wake_info);
++	kfree(android);
+ 	drvr->android = NULL;
+ 
+ 	return 0;
+@@ -2003,3 +2018,88 @@ void brcmf_android_restore_pktfilter(struct brcmf_pub *drvr)
+ 		if (list & BIT(i))
+ 			brcmf_pktfilter_add_remove(ndev, i, true);
+ }
++
++void brcmf_android_set_wake_flag(struct brcmf_pub *drvr, int set)
++{
++	struct brcmf_andr_wake_bus_info *wake_info = drvr->android->wake_info;
++
++	atomic_set(&wake_info->pkt_wake, set);
++}
++
++int brcmf_android_get_wake_flag(struct brcmf_pub *drvr)
++{
++	struct brcmf_andr_wake_bus_info *wake_info = drvr->android->wake_info;
++	int ret;
++
++	ret = atomic_read(&wake_info->pkt_wake);
++
++	return ret;
++}
++
++void brcmf_android_add_wake_event_cnts(struct brcmf_pub *drvr,
++				       enum brcmf_fweh_event_code code)
++{
++	struct brcmf_andr_wake_counts *wake_cnts = drvr->android->wake_cnts;
++	int pkt_wake = 0;
++
++	if (code >= BRCMF_E_LAST)
++		return;
++
++	pkt_wake = brcmf_android_get_wake_flag(drvr);
++	if (unlikely(pkt_wake)) {
++		brcmf_android_set_wake_flag(drvr, 0);
++		wake_cnts->rc_event[code]++;
++		wake_cnts->rcwake++;
++	}
++}
++
++void brcmf_android_add_wake_pkt_cnts(struct brcmf_pub *drvr,
++				     struct sk_buff *skb)
++{
++	struct brcmf_andr_wake_counts *wake_cnts = drvr->android->wake_cnts;
++	int pkt_wake = 0;
++	u32 hoff;
++	struct ipv6hdr *ip6h;
++	struct icmp6hdr *icmp6h;
++
++	pkt_wake = brcmf_android_get_wake_flag(drvr);
++	if (unlikely(pkt_wake)) {
++		brcmf_android_set_wake_flag(drvr, 0);
++		wake_cnts->rxwake++;
++		if (skb->pkt_type == PACKET_HOST) {
++			wake_cnts->rx_ucast++;
++		} else if (skb->pkt_type == PACKET_MULTICAST) {
++			wake_cnts->rx_mcast++;
++			if (skb->protocol == htons(ETH_P_IPV6)) {
++				hoff = sizeof(*ip6h);
++				wake_cnts->rx_multi_ipv6++;
++				ip6h = (struct ipv6hdr *)skb->data;
++				icmp6h = (struct icmp6hdr *)(skb->data + hoff);
++				if (skb->len > hoff + 1 &&
++				    ip6h->nexthdr == IPPROTO_ICMPV6) {
++					wake_cnts->rx_icmpv6++;
++					switch (icmp6h->icmp6_type) {
++					case NDISC_ROUTER_ADVERTISEMENT:
++						wake_cnts->rx_icmpv6_ra++;
++						break;
++					case NDISC_NEIGHBOUR_ADVERTISEMENT:
++						wake_cnts->rx_icmpv6_na++;
++						break;
++					case NDISC_NEIGHBOUR_SOLICITATION:
++						wake_cnts->rx_icmpv6_ns++;
++						break;
++					}
++				}
++			} else if (skb->protocol == htons(ETH_P_IP)) {
++				wake_cnts->rx_multi_ipv4++;
++			} else {
++				wake_cnts->rx_multi_other++;
++			}
++		} else if (skb->pkt_type == PACKET_BROADCAST) {
++			wake_cnts->rx_bcast++;
++		}
++
++		if (skb->protocol == htons(ETH_P_ARP))
++			wake_cnts->rx_arp++;
++	}
++}
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+index 64994c5c854f..ce17e1492583 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+@@ -50,6 +50,12 @@ int brcmf_handle_private_cmd(struct brcmf_pub *drvr, struct net_device *net,
+ int brcmf_android_reset_country(struct brcmf_pub *drvr);
+ int brcmf_android_set_extra_wiphy(struct wiphy *wiphy, struct brcmf_if *ifp);
+ void brcmf_android_restore_pktfilter(struct brcmf_pub *drvr);
++void brcmf_android_set_wake_flag(struct brcmf_pub *drvr, int set);
++int brcmf_android_get_wake_flag(struct brcmf_pub *drvr);
++void brcmf_android_add_wake_event_cnts(struct brcmf_pub *drvr,
++				       enum brcmf_fweh_event_code code);
++void brcmf_android_add_wake_pkt_cnts(struct brcmf_pub *drvr,
++				     struct sk_buff *skb);
+ 
+ struct brcmf_android_wifi_priv_cmd {
+ 	char *buf;
+@@ -63,7 +69,27 @@ struct brcmf_android_wifi_priv_cmd {
+ #define RS_OK		(0)
+ #define RS_INIT		(1)
+ 
+-#if defined(CONFIG_BRCMFMAC_ANDROID)
++struct brcmf_andr_wake_counts {
++	u32 rcwake;
++	u32 rc_event[BRCMF_E_LAST];
++	u32 rxwake;
++	u32 rx_ucast;
++	u32 rx_mcast;
++	u32 rx_bcast;
++	u32 rx_arp;
++	u32 rx_icmpv6;
++	u32 rx_multi_ipv6;
++	u32 rx_multi_ipv4;
++	u32 rx_multi_other;
++	u32 rx_icmpv6_ra;
++	u32 rx_icmpv6_na;
++	u32 rx_icmpv6_ns;
++};
++
++struct brcmf_andr_wake_bus_info {
++	atomic_t pkt_wake;
++};
++
+ struct brcmf_android {
+ 	struct brcmf_pub *drvr;
+ 	struct wiphy *wiphy;
+@@ -83,7 +109,8 @@ struct brcmf_android {
+ 	void *fw_mem_dump;
+ 	size_t fw_mem_dump_len;
+ 	u8 enabled_ndev_num;
++	struct brcmf_andr_wake_counts *wake_cnts;
++	struct brcmf_andr_wake_bus_info *wake_info;
+ };
+-#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ int brcmu_ether_atoe(const char *p,  char *ea);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
+index a28de48f8baa..04836e5b1422 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
+@@ -1180,6 +1180,7 @@ static int brcmf_ops_sdio_suspend(struct device *dev)
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_android_wake_lock_waive(bus_if->drvr, false);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
++	bus_if->chk_pm = true;
+ 	return 0;
+ }
+ 
+@@ -1194,6 +1195,7 @@ static int brcmf_ops_sdio_resume(struct device *dev)
+ 		return 0;
+ 
+ 	brcmf_sdiod_freezer_off(sdiodev);
++	bus_if->chk_pm = false;
+ 	return 0;
+ }
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bus.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bus.h
+index c173401660b2..0919802a98cf 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bus.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bus.h
+@@ -155,6 +155,7 @@ struct brcmf_bus {
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0))
+ 	bool allow_skborphan;
+ #endif
++	bool chk_pm;
+ };
+ 
+ /*
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index 1fd2a51bb793..8d1e7356698d 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -468,6 +468,9 @@ void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb)
+ 		brcmu_pkt_buf_free_skb(skb);
+ 		return;
+ 	}
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	brcmf_android_add_wake_pkt_cnts(ifp->drvr, skb);
++#endif
+ 
+ 	if (skb->pkt_type == PACKET_MULTICAST)
+ 		ifp->ndev->stats.multicast++;
+@@ -691,7 +694,7 @@ static int brcmf_netdev_open(struct net_device *ndev)
+ 		bphy_err(drvr, "failed to bring up cfg80211\n");
+ 		return -EIO;
+ 	}
+-#if !defined(CONFIG_BRCMFMAC_ANDROID)
++#ifndef CONFIG_BRCMFMAC_ANDROID
+ 	/* Clear, carrier, set when connected or AP mode. */
+ 	netif_carrier_off(ndev);
+ #endif /* !defined(CONFIG_BRCMFMAC_ANDROID) */
+@@ -701,20 +704,12 @@ static int brcmf_netdev_open(struct net_device *ndev)
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ static const struct net_device_ops brcmf_netdev_ops_pri = {
+-#if !defined(CONFIG_BRCMFMAC_ANDROID)
+-	.ndo_open = brcmf_netdev_open,
+-	.ndo_stop = brcmf_netdev_stop,
+-	.ndo_start_xmit = brcmf_netdev_start_xmit,
+-	.ndo_set_mac_address = brcmf_netdev_set_mac_address,
+-	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list,
+-#elif defined(CONFIG_BRCMFMAC_ANDROID)
+ 	.ndo_open = brcmf_android_netdev_open,
+ 	.ndo_stop = brcmf_android_netdev_stop,
+ 	.ndo_do_ioctl = brcmf_android_ioctl_entry,
+ 	.ndo_start_xmit = brcmf_android_netdev_start_xmit,
+ 	.ndo_set_mac_address = brcmf_android_netdev_set_mac_address,
+ 	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list
+-#endif /* !defined(CONFIG_BRCMFMAC_ANDROID) */
+ };
+ #else
+ static const struct net_device_ops brcmf_netdev_ops_pri = {
+@@ -790,7 +785,7 @@ void brcmf_net_setcarrier(struct brcmf_if *ifp, bool on)
+ 
+ 	ndev = ifp->ndev;
+ 	brcmf_txflowblock_if(ifp, BRCMF_NETIF_STOP_REASON_DISCONNECTED, !on);
+-#if !defined(CONFIG_BRCMFMAC_ANDROID)
++#ifndef CONFIG_BRCMFMAC_ANDROID
+ 	if (on) {
+ 		if (!netif_carrier_ok(ndev))
+ 			netif_carrier_on(ndev);
+@@ -1557,7 +1552,7 @@ void brcmf_detach(struct device *dev)
+ 	if (drvr->config) {
+ 		brcmf_p2p_detach(&drvr->config->p2p);
+ 		brcmf_cfg80211_detach(drvr->config);
+-#if !defined(CONFIG_BRCMFMAC_ANDROID)
++#ifndef CONFIG_BRCMFMAC_ANDROID
+ 		drvr->config = NULL;
+ #endif
+ 	}
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fweh.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fweh.c
+index 79c8a858b6d6..fb22894c5604 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fweh.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fweh.c
+@@ -14,6 +14,9 @@
+ #include "fweh.h"
+ #include "fwil.h"
+ #include "proto.h"
++#ifdef CONFIG_BRCMFMAC_ANDROID
++#include "android.h"
++#endif
+ 
+ /**
+  * struct brcmf_fweh_queue_item - event item on event queue.
+@@ -404,6 +407,10 @@ void brcmf_fweh_process_event(struct brcmf_pub *drvr,
+ 	if (code >= BRCMF_E_LAST)
+ 		return;
+ 
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	brcmf_android_add_wake_event_cnts(drvr, code);
++#endif
++
+ 	if (code != BRCMF_E_IF && !fweh->evt_handler[code])
+ 		return;
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+index a4bdfec8053e..112ad55235c3 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+@@ -1065,6 +1065,11 @@ static irqreturn_t brcmf_pcie_isr_thread(int irq, void *arg)
+ {
+ 	struct brcmf_pciedev_info *devinfo = (struct brcmf_pciedev_info *)arg;
+ 	u32 status;
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	struct brcmf_bus *bus = dev_get_drvdata(&devinfo->pdev->dev);
++
++	brcmf_android_wake_lock(bus->drvr);
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+ 	devinfo->in_irq = true;
+ 	status = brcmf_pcie_read_reg32(devinfo, BRCMF_PCIE_PCIE2REG_MAILBOXINT);
+@@ -1072,6 +1077,10 @@ static irqreturn_t brcmf_pcie_isr_thread(int irq, void *arg)
+ 	if (status) {
+ 		brcmf_pcie_write_reg32(devinfo, BRCMF_PCIE_PCIE2REG_MAILBOXINT,
+ 				       status);
++#ifdef CONFIG_BRCMFMAC_ANDROID
++		if (bus->chk_pm)
++			brcmf_android_set_wake_flag(bus->drvr, 1);
++#endif
+ 		if (status & (BRCMF_PCIE_MB_INT_FN0_0 |
+ 			      BRCMF_PCIE_MB_INT_FN0_1))
+ 			brcmf_pcie_handle_mb_data(devinfo);
+@@ -1085,6 +1094,11 @@ static irqreturn_t brcmf_pcie_isr_thread(int irq, void *arg)
+ 	if (devinfo->state == BRCMFMAC_PCIE_STATE_UP)
+ 		brcmf_pcie_intr_enable(devinfo);
+ 	devinfo->in_irq = false;
++
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	brcmf_android_wake_unlock(bus->drvr);
++#endif
++
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -2310,6 +2324,9 @@ static int brcmf_pcie_pm_enter_D3(struct device *dev)
+ 	if (!retry && config->pm_state == BRCMF_CFG80211_PM_STATE_SUSPENDING)
+ 		brcmf_err(bus, "timed out wait for cfg80211 suspended\n");
+ 
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	brcmf_android_wake_lock_waive(bus->drvr, true);
++#endif /* CONFIG_BRCMFMAC_ANDROI) */
+ 	brcmf_bus_change_state(bus, BRCMF_BUS_DOWN);
+ 
+ 	devinfo->mbdata_completed = false;
+@@ -2324,6 +2341,10 @@ static int brcmf_pcie_pm_enter_D3(struct device *dev)
+ 	}
+ 
+ 	devinfo->state = BRCMFMAC_PCIE_STATE_DOWN;
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	brcmf_android_wake_lock_waive(bus->drvr, false);
++#endif /* CONFIG_BRCMFMAC_ANDROID */
++	bus->chk_pm = true;
+ 
+ 	return 0;
+ }
+@@ -2353,6 +2374,7 @@ static int brcmf_pcie_pm_leave_D3(struct device *dev)
+ 		brcmf_bus_change_state(bus, BRCMF_BUS_UP);
+ 		brcmf_pcie_intr_enable(devinfo);
+ 		brcmf_pcie_hostready(devinfo);
++		bus->chk_pm = false;
+ 		return 0;
+ 	}
+ 
+@@ -2361,11 +2383,11 @@ static int brcmf_pcie_pm_leave_D3(struct device *dev)
+ 	devinfo->ci = NULL;
+ 	pdev = devinfo->pdev;
+ 	brcmf_pcie_remove(pdev);
++	bus->chk_pm = false;
+ 
+ 	err = brcmf_pcie_probe(pdev, NULL);
+ 	if (err)
+ 		brcmf_err(bus, "probe after resume failed, err=%d\n", err);
+-
+ 	return err;
+ }
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+index 3adf205942e4..04002f944a2a 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+@@ -3844,6 +3844,10 @@ void brcmf_sdio_trigger_dpc(struct brcmf_sdio *bus)
+ 
+ void brcmf_sdio_isr(struct brcmf_sdio *bus)
+ {
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	struct brcmf_pub *drvr = bus->sdiodev->bus_if->drvr;
++#endif /* CONFIG_BRCMFMAC_ANDROID */
++
+ 	brcmf_dbg(TRACE, "Enter\n");
+ 
+ 	if (!bus) {
+@@ -3851,6 +3855,13 @@ void brcmf_sdio_isr(struct brcmf_sdio *bus)
+ 		return;
+ 	}
+ 
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	brcmf_android_wake_lock(drvr);
++
++	if (bus->sdiodev->bus_if->chk_pm)
++		brcmf_android_set_wake_flag(drvr, 1);
++#endif /* CONFIG_BRCMFMAC_ANDROID */
++
+ 	/* Count the interrupt call */
+ 	bus->sdcnt.intrcount++;
+ 	if (in_interrupt())
+@@ -3866,6 +3877,9 @@ void brcmf_sdio_isr(struct brcmf_sdio *bus)
+ 
+ 	bus->dpc_triggered = true;
+ 	queue_work(bus->brcmf_wq, &bus->datawork);
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	brcmf_android_wake_unlock(drvr);
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ }
+ 
+ static void brcmf_sdio_bus_watchdog(struct brcmf_sdio *bus)
+@@ -3925,7 +3939,7 @@ static void brcmf_sdio_bus_watchdog(struct brcmf_sdio *bus)
+ 			sdio_release_host(bus->sdiodev->func1);
+ 		}
+ 	}
+-#endif				/* DEBUG */
++#endif	/* DEBUG */
+ 
+ 	/* On idle timeout clear activity flag and/or turn off clock */
+ 	if (!bus->dpc_triggered) {
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+index 5d0e4de9bba5..7e9bfab3e286 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+@@ -727,8 +727,76 @@ brcmf_cfg80211_andr_get_wake_reason_stats(struct wiphy *wiphy,
+ 					  struct wireless_dev *wdev,
+ 					  const void *data, int len)
+ {
+-	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
+-	return -ENOTSUPP;
++	int ret = 0;
++	struct brcmf_cfg80211_vif *vif;
++	struct brcmf_if *ifp;
++	struct sk_buff *reply;
++	struct brcmf_andr_wake_counts *wake_cnts;
++
++	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
++	ifp = vif->ifp;
++	if (!ifp || !ifp->drvr || !ifp->drvr->bus_if || !ifp->drvr->android)
++		return -ENODEV;
++
++	brcmf_android_wake_lock(ifp->drvr);
++
++	wake_cnts = ifp->drvr->android->wake_cnts;
++
++	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
++						    (BRCMF_E_LAST +
++						     WAKE_STAT_ATTRIBUTE_LAST) *
++						     sizeof(u32));
++	if (!reply) {
++		ret = -ENOMEM;
++		goto exit;
++	}
++
++	/* put event wake info */
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_TOTAL_CMD_EVENT,
++		    wake_cnts->rcwake);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_CMD_EVENT_COUNT_USED,
++		    BRCMF_E_LAST);
++	nla_put(reply, WAKE_STAT_ATTRIBUTE_CMD_EVENT_WAKE,
++		(BRCMF_E_LAST * sizeof(u32)), wake_cnts->rc_event);
++
++	/* put RX wake info */
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_TOTAL_RX_DATA_WAKE,
++		    (u32)wake_cnts->rxwake);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_RX_UNICAST_COUNT,
++		    (u32)wake_cnts->rx_ucast);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_RX_MULTICAST_COUNT,
++		    (u32)wake_cnts->rx_mcast);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_RX_BROADCAST_COUNT,
++		    (u32)wake_cnts->rx_bcast);
++
++	/* put ICMP */
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_RX_ICMP_PKT,
++		    (u32)wake_cnts->rx_arp);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_RX_ICMP6_PKT,
++		    (u32)wake_cnts->rx_icmpv6);
++
++	/* put multicast info */
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_IPV4_RX_MULTICAST_ADD_CNT,
++		    (u32)wake_cnts->rx_multi_ipv4);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_IPV6_RX_MULTICAST_ADD_CNT,
++		    (u32)wake_cnts->rx_multi_ipv6);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_OTHER_RX_MULTICAST_ADD_CNT,
++		    (u32)wake_cnts->rx_multi_other);
++
++	 /* TODO: following counts are not available now */
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_RX_ICMP6_RA,
++		    (u32)wake_cnts->rx_icmpv6_ra);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_RX_ICMP6_NA,
++		    (u32)wake_cnts->rx_icmpv6_na);
++	nla_put_u32(reply, WAKE_STAT_ATTRIBUTE_RX_ICMP6_NS,
++		    (u32)wake_cnts->rx_icmpv6_ns);
++
++	cfg80211_vendor_cmd_reply(reply);
++
++exit:
++	brcmf_android_wake_unlock(ifp->drvr);
++
++	return ret;
+ }
+ 
+ static int
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
+index e8afd783af81..44bebb85dddc 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
+@@ -255,6 +255,30 @@ enum debug_attributes {
+ 	DEBUG_ATTRIBUTE_PKT_FATE_DATA
+ };
+ 
++enum wake_stat_attributes {
++	WAKE_STAT_ATTRIBUTE_TOTAL_CMD_EVENT,
++	WAKE_STAT_ATTRIBUTE_CMD_EVENT_WAKE,
++	WAKE_STAT_ATTRIBUTE_CMD_EVENT_COUNT,
++	WAKE_STAT_ATTRIBUTE_CMD_EVENT_COUNT_USED,
++	WAKE_STAT_ATTRIBUTE_TOTAL_DRIVER_FW,
++	WAKE_STAT_ATTRIBUTE_DRIVER_FW_WAKE,
++	WAKE_STAT_ATTRIBUTE_DRIVER_FW_COUNT,
++	WAKE_STAT_ATTRIBUTE_DRIVER_FW_COUNT_USED,
++	WAKE_STAT_ATTRIBUTE_TOTAL_RX_DATA_WAKE,
++	WAKE_STAT_ATTRIBUTE_RX_UNICAST_COUNT,
++	WAKE_STAT_ATTRIBUTE_RX_MULTICAST_COUNT,
++	WAKE_STAT_ATTRIBUTE_RX_BROADCAST_COUNT,
++	WAKE_STAT_ATTRIBUTE_RX_ICMP_PKT,
++	WAKE_STAT_ATTRIBUTE_RX_ICMP6_PKT,
++	WAKE_STAT_ATTRIBUTE_RX_ICMP6_RA,
++	WAKE_STAT_ATTRIBUTE_RX_ICMP6_NA,
++	WAKE_STAT_ATTRIBUTE_RX_ICMP6_NS,
++	WAKE_STAT_ATTRIBUTE_IPV4_RX_MULTICAST_ADD_CNT,
++	WAKE_STAT_ATTRIBUTE_IPV6_RX_MULTICAST_ADD_CNT,
++	WAKE_STAT_ATTRIBUTE_OTHER_RX_MULTICAST_ADD_CNT,
++	WAKE_STAT_ATTRIBUTE_LAST
++};
++
+ enum apf_attributes {
+ 	APF_ATTRIBUTE_VERSION,
+ 	APF_ATTRIBUTE_MAX_LEN,
+-- 
+2.25.0
+

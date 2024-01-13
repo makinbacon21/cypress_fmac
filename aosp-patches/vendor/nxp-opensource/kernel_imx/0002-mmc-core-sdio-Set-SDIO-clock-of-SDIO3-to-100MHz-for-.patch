@@ -1,0 +1,35 @@
+From 4d8afed6a3ca4c87f9932ad73ce1da4c75924bea Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Wed, 30 Sep 2020 00:44:25 -0500
+Subject: [PATCH 2/2] mmc: core: sdio: Set SDIO clock of SDIO3 to 100MHz for
+ BRCM 4354 chip
+
+This patch uses limit clock rate quirk to reduce clock rate for "SDR104"
+mode on IMX side for Broadcom 4354 WiFi + Bluetooth chip side, because
+we saw "hardware interrupt timeout" during SDIO initialization when
+SDIO at the speed of higher than 100MHz.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+
+JIRA: SWLINUX-1793
+---
+ drivers/mmc/core/quirks.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/mmc/core/quirks.h b/drivers/mmc/core/quirks.h
+index 2d2d9ea8be4f..40caf13b14f6 100644
+--- a/drivers/mmc/core/quirks.h
++++ b/drivers/mmc/core/quirks.h
+@@ -135,6 +135,9 @@ static const struct mmc_fixup sdio_fixup_methods[] = {
+ 	SDIO_FIXUP(SDIO_VENDOR_ID_MARVELL, SDIO_DEVICE_ID_MARVELL_8887WLAN,
+ 		   add_limit_rate_quirk, 150000000),
+ 
++	SDIO_FIXUP(SDIO_VENDOR_ID_BROADCOM, SDIO_DEVICE_ID_BROADCOM_4354,
++		   add_limit_rate_quirk, 150000000),
++
+ 	END_FIXUP
+ };
+ 
+-- 
+2.25.0
+

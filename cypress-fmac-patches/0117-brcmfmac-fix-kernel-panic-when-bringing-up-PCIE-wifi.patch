@@ -1,0 +1,122 @@
+From 79f072006777fceac10aff40fce8d8f936bb339c Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Tue, 26 May 2020 01:17:22 -0500
+Subject: [PATCH 117/130] brcmfmac: fix kernel panic when bringing up PCIE wifi
+ card
+
+To avoid kernel panic in cfg80211/nl80211, We should not remove wiphy
+and cfg80211 ops when bringing down interface.
+
+Verified with 54591 PCIE wifi card.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../broadcom/brcm80211/brcmfmac/core.c        |  2 +-
+ .../broadcom/brcm80211/brcmfmac/pcie.c        | 44 ++++++++++++++++---
+ 2 files changed, 39 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index c315cfa2cdec..bf08f4ee2a9c 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -46,7 +46,7 @@
+ #define	D11_PHY_HDR_LEN				6
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-#define MAX_WAIT_FOR_BUS_START			msecs_to_jiffies(60000)
++#define MAX_WAIT_FOR_BUS_START			msecs_to_jiffies(20000)
+ 
+ struct brcmf_pub *g_drvr;
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+index 3d8af05fc6bb..9d856f768b85 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+@@ -2004,14 +2004,29 @@ static void brcmf_pcie_setup(struct device *dev, int ret,
+ 	struct brcmf_pciedev_info *devinfo;
+ 	struct brcmf_commonring **flowrings;
+ 	u32 i, nvram_len;
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	struct brcmf_pub *drvr = g_drvr;
++#endif
++	bus = dev_get_drvdata(dev);
++	pcie_bus_dev = bus->bus_priv.pcie;
++	devinfo = pcie_bus_dev->devinfo;
+ 
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	if (!brcmf_android_in_reset(drvr)) {
++		if (!ret) {
++			fw = fwreq->items[BRCMF_PCIE_FW_CODE].binary;
++			nvram = fwreq->items[BRCMF_PCIE_FW_NVRAM].nv_data.data;
++			release_firmware(fw);
++			brcmf_fw_nvram_free(nvram);
++		}
++		brcmf_android_attach(dev, devinfo->settings);
++		return;
++	}
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 	/* check firmware loading result */
+ 	if (ret)
+ 		goto fail;
+ 
+-	bus = dev_get_drvdata(dev);
+-	pcie_bus_dev = bus->bus_priv.pcie;
+-	devinfo = pcie_bus_dev->devinfo;
+ 	brcmf_pcie_attach(devinfo);
+ 
+ 	fw = fwreq->items[BRCMF_PCIE_FW_CODE].binary;
+@@ -2080,6 +2095,10 @@ static void brcmf_pcie_setup(struct device *dev, int ret,
+ 
+ 	brcmf_pcie_bus_console_read(devinfo, false);
+ 
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	brcmf_wake_dev_reset_waitq(drvr, 0);
++#endif
++
+ 	return;
+ 
+ fail:
+@@ -2127,6 +2146,9 @@ brcmf_pcie_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	struct brcmf_pciedev_info *devinfo;
+ 	struct brcmf_pciedev *pcie_bus_dev;
+ 	struct brcmf_bus *bus;
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	struct brcmf_pub *drvr = g_drvr;
++#endif
+ 
+ 	brcmf_dbg(PCIE, "Enter %x:%x\n", pdev->vendor, pdev->device);
+ 
+@@ -2182,9 +2204,15 @@ brcmf_pcie_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	bus->wowl_supported = pci_pme_capable(pdev, PCI_D3hot);
+ 	dev_set_drvdata(&pdev->dev, bus);
+ 
+-	ret = brcmf_alloc(&devinfo->pdev->dev, devinfo->settings);
+-	if (ret)
+-		goto fail_bus;
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	if (brcmf_android_in_reset(drvr))
++#endif
++	{
++		bus->drvr = drvr;
++		ret = brcmf_alloc(&devinfo->pdev->dev, devinfo->settings);
++		if (ret)
++			goto fail_bus;
++	}
+ 
+ 	fwreq = brcmf_pcie_prepare_fw_request(devinfo);
+ 	if (!fwreq) {
+@@ -2234,7 +2262,11 @@ brcmf_pcie_remove(struct pci_dev *pdev)
+ 		brcmf_pcie_intr_disable(devinfo);
+ 
+ 	brcmf_detach(&pdev->dev);
++#ifdef CONFIG_BRCMFMAC_ANDROID
++    brcmf_dbg(PCIE, "not do brcmf_free\n");
++#else
+ 	brcmf_free(&pdev->dev);
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+ 	kfree(bus->bus_priv.pcie);
+ 	kfree(bus->msgbuf->flowrings);
+-- 
+2.25.0
+

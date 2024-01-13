@@ -1,0 +1,181 @@
+From 5d7ef38b78e67b794f1f352def189e524085f3d6 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Tue, 30 Jun 2020 04:22:52 -0500
+Subject: [PATCH 123/130] convert code implementation of suspend blockers
+
+Android kernel still provides the wake lock interface for compatibility
+with older drivers. However, there is no indication of how long this
+compatibility layer will be maintained. Therefore, we replace Android
+implementation with Linux implementation.
+
+1. Replace struct wake_lock with struct wakeup_source.
+2. Replace instances of wake_lock_init() with wakeup_source_init().
+3. Replace instances of wake_lock_destroy() with wakeup_source_trash().
+4. Replace instances of wake_lock() with __pm_stay_awake().
+5. Replace instances of wake_unlock() with __pm_relax().
+6. Replace instances of wake_lock_timeout() with __pm_wakeup_event().
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../broadcom/brcm80211/brcmfmac/android.c        | 16 +++++++---------
+ .../broadcom/brcm80211/brcmfmac/android.h        |  4 ++--
+ .../broadcom/brcm80211/brcmfmac/bcmsdh.c         |  1 -
+ .../wireless/broadcom/brcm80211/brcmfmac/core.c  |  1 -
+ .../broadcom/brcm80211/brcmfmac/firmware.c       |  1 -
+ .../wireless/broadcom/brcm80211/brcmfmac/pcie.c  |  1 -
+ .../wireless/broadcom/brcm80211/brcmfmac/sdio.c  |  1 -
+ .../broadcom/brcm80211/brcmfmac/vendor.c         |  1 -
+ 8 files changed, 9 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+index 506cb3004fd6..91f235eb82a5 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+@@ -29,7 +29,6 @@
+  * so agrees to indemnify Cypress against all liability.
+  */
+ #include <linux/mmc/card.h>
+-#include <linux/wakelock.h>
+ #include <defs.h>
+ #include <brcmu_utils.h>
+ #include "core.h"
+@@ -1756,9 +1755,8 @@ int brcmf_android_attach(struct device *dev, struct brcmf_mp_device *settings)
+ 	android->country[0] = 0;
+ 	android->country[1] = 0;
+ 	android->country[2] = 0;
+-	wake_lock_init(&android->wakelock, WAKE_LOCK_SUSPEND, "brcm_wlan_wake");
+-	wake_lock_init(&android->rx_wakelock, WAKE_LOCK_SUSPEND,
+-		       "brcm_wlan_rxwake");
++	wakeup_source_init(&android->wakelock, "brcm_wlan_wake");
++	wakeup_source_init(&android->rx_wakelock, "brcm_wlan_rxwake");
+ 	spin_lock_init(&android->wakelock_spinlock);
+ 	drvr->android = android;
+ 
+@@ -1777,8 +1775,8 @@ int brcmf_android_detach(struct brcmf_pub *drvr)
+ 
+ 	brcmf_dbg(TRACE, "enter\n");
+ 
+-	wake_lock_destroy(&android->wakelock);
+-	wake_lock_destroy(&android->rx_wakelock);
++	wakeup_source_trash(&android->wakelock);
++	wakeup_source_trash(&android->rx_wakelock);
+ 	kfree(drvr->android);
+ 	drvr->android = NULL;
+ 
+@@ -1836,7 +1834,7 @@ int brcmf_android_wake_unlock_timeout(struct brcmf_pub *drvr)
+ 		return -EOPNOTSUPP;
+ 
+ 	spin_lock_irqsave(&android->wakelock_spinlock, flags);
+-	wake_lock_timeout(&android->rx_wakelock, msecs_to_jiffies(200));
++	__pm_wakeup_event(&android->rx_wakelock, msecs_to_jiffies(200));
+ 	spin_unlock_irqrestore(&android->wakelock_spinlock, flags);
+ 
+ 	ret = brcmf_android_wake_unlock(drvr);
+@@ -1863,7 +1861,7 @@ int brcmf_android_wake_lock(struct brcmf_pub *drvr)
+ 		spin_lock_irqsave(&android->wakelock_spinlock, flags);
+ 
+ 		if (android->wakelock_counter == 0)
+-			wake_lock(&android->wakelock);
++			__pm_stay_awake(&android->wakelock);
+ 
+ 		android->wakelock_counter++;
+ 		ret = android->wakelock_counter;
+@@ -1894,7 +1892,7 @@ int brcmf_android_wake_unlock(struct brcmf_pub *drvr)
+ 			android->wakelock_counter--;
+ 
+ 		if (android->wakelock_counter == 0)
+-			wake_unlock(&android->wakelock);
++			__pm_relax(&android->wakelock);
+ 
+ 		ret = android->wakelock_counter;
+ 	}
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+index 6b0272ab8927..961aae4e0c24 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+@@ -69,8 +69,8 @@ struct brcmf_android {
+ 	bool init_done;
+ 	char country[3];
+ 	bool wakelock_waive;
+-	struct wake_lock wakelock;
+-	struct wake_lock rx_wakelock;
++	struct wakeup_source wakelock;
++	struct wakeup_source rx_wakelock;
+ 	spinlock_t wakelock_spinlock;	/* must be held before using wakelock */
+ 	unsigned int wakelock_counter;
+ 	unsigned int wakelock_waive_counter;
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
+index d2eabf8c732d..a28de48f8baa 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
+@@ -39,7 +39,6 @@
+ #include "cfg80211.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ #include <linux/regulator/consumer.h>
+-#include <linux/wakelock.h>
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index a90140b432a3..831db9364973 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -28,7 +28,6 @@
+ #include "pcie.h"
+ #include "common.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-#include <linux/wakelock.h>
+ #include <linux/regulator/consumer.h>
+ #include <defs.h>
+ #include "fwsignal.h"
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
+index b1754fc7ce4e..c17ea7b31f4f 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
+@@ -17,7 +17,6 @@
+ #include "common.h"
+ #include "chip.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-#include <linux/wakelock.h>
+ #include "bus.h"
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+index 9d856f768b85..68cd00479e6e 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+@@ -40,7 +40,6 @@
+ #include "common.h"
+ #include "cfg80211.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-#include <linux/wakelock.h>
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+index 31bf61ed62c7..5469a159e902 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+@@ -37,7 +37,6 @@
+ #include "bcdc.h"
+ #include "fwil.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-#include <linux/wakelock.h>
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+index d73a1cc48773..5d0e4de9bba5 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+@@ -17,7 +17,6 @@
+ #include "fwil.h"
+ #include "feature.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-#include <linux/wakelock.h>
+ #include "android.h"
+ #include "bus.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+-- 
+2.25.0
+

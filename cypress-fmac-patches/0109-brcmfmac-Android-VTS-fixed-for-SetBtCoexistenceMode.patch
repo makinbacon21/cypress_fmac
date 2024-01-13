@@ -1,0 +1,37 @@
+From a9f1f70209a2b26c6432cfa7a69aa779496e2f2d Mon Sep 17 00:00:00 2001
+From: "Ethan Kim(Youngic)" <youngsic.kim@cypress.com>
+Date: Thu, 18 Jul 2019 04:18:45 -0500
+Subject: [PATCH 109/130] brcmfmac: Android VTS fixed for SetBtCoexistenceMode
+
+  There is No handle to 'BTCOEXMODE 0' commands.
+  According to Android code, BTCOEXMODE definition like this:
+  1. 'BTCOEXMODE 1' : Enable BTCOEX mode
+  2. 'BTCOEXMODE 0' : Disable BTCOEX mode
+  3. 'BTCOEXMODE 2' : Set the coexistence mode back to its default value
+
+Signed-off-by: Ethan Kim(Youngic) <youngsic.kim@cypress.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+index 6c316e9a8c27..8cd9f5492a03 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+@@ -175,8 +175,13 @@ int brcmf_android_set_btcoexmode(struct net_device *ndev, char *command,
+ 	btcoex_mode = *(command + strlen(CMD_BTCOEXMODE) + 1) - '0';
+ 
+ 	if (btcoex_mode == 1) {
++	/* Enable to BTCOEXMODE with DHCP setup */
+ 		ret = brcmf_crit_proto_start(ndev);
++	} else if (btcoex_mode == 0) {
++	/* Disable to BTCOEXMODE with DHCP setup */
++		ret = brcmf_crit_proto_stop(ndev);
+ 	} else if (btcoex_mode == 2) {
++	/* Set the coex mode back to its default value (Post DHCP setup) */
+ 		ret = brcmf_crit_proto_stop(ndev);
+ 	} else {
+ 		brcmf_err("unknown btcode mode(%d)\n", btcoex_mode);
+-- 
+2.25.0
+

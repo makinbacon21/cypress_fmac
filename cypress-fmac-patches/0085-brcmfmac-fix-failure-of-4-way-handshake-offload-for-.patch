@@ -1,0 +1,49 @@
+From a9d1dc9255f7cfbf0fe5dd0405ff61a187324bc7 Mon Sep 17 00:00:00 2001
+From: Chung-Hsien Hsu <stanley.hsu@cypress.com>
+Date: Mon, 17 Feb 2020 04:18:15 -0600
+Subject: [PATCH 085/130] brcmfmac: fix failure of 4-way handshake offload for
+ WPA/WPA2-PSK
+
+An incorrect value of use_fwsup is set for 4-way handshake offload for
+WPA//WPA2-PSK, caused by commit 3b1e0a7bdfee ("brcmfmac: add support for
+SAE authentication offload"). It results in missing bit
+BRCMF_VIF_STATUS_EAP_SUCCESS set in brcmf_is_linkup() and causes the
+failure. This patch correct the value for the case.
+
+Fixes: 3b1e0a7bdfee ("brcmfmac: add support for SAE authentication
+offload")
+Signed-off-by: Chung-Hsien Hsu <stanley.hsu@cypress.com>
+---
+ .../net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c  | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index 94f4de15cd51..23143d9b9fc8 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -1748,6 +1748,10 @@ brcmf_set_key_mgmt(struct net_device *ndev, struct cfg80211_connect_params *sme)
+ 		switch (sme->crypto.akm_suites[0]) {
+ 		case WLAN_AKM_SUITE_SAE:
+ 			val = WPA3_AUTH_SAE_PSK;
++			if (sme->crypto.sae_pwd) {
++				brcmf_dbg(INFO, "using SAE offload\n");
++				profile->use_fwsup = BRCMF_PROFILE_FWSUP_SAE;
++			}
+ 			break;
+ 		default:
+ 			bphy_err(drvr, "invalid cipher group (%d)\n",
+@@ -2042,11 +2046,6 @@ brcmf_cfg80211_connect(struct wiphy *wiphy, struct net_device *ndev,
+ 		goto done;
+ 	}
+ 
+-	if (sme->crypto.sae_pwd) {
+-		brcmf_dbg(INFO, "using SAE offload\n");
+-		profile->use_fwsup = BRCMF_PROFILE_FWSUP_SAE;
+-	}
+-
+ 	if (sme->crypto.psk &&
+ 	    profile->use_fwsup != BRCMF_PROFILE_FWSUP_SAE) {
+ 		if (WARN_ON(profile->use_fwsup != BRCMF_PROFILE_FWSUP_NONE)) {
+-- 
+2.25.0
+

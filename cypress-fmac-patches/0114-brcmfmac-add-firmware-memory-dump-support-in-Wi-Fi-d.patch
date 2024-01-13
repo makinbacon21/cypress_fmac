@@ -1,0 +1,339 @@
+From 08d9ba8b2815c4fa507d6e7233743d5e84981ab1 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Thu, 9 Jan 2020 21:10:07 -0600
+Subject: [PATCH 114/130] brcmfmac: add firmware memory dump support in Wi-Fi
+ debugging feature
+
+Android supports dumping Wi-Fi firmware memory after version 8.0, so we
+add this feature support in FMAC host driver.
+
+Verified: checked firmware dump in bugreport
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../broadcom/brcm80211/brcmfmac/android.h     |   2 +
+ .../broadcom/brcm80211/brcmfmac/vendor.c      | 193 ++++++++++++++++--
+ .../broadcom/brcm80211/brcmfmac/vendor.h      |   2 +-
+ 3 files changed, 184 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+index a01d195a0af9..09467cdd1b0f 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+@@ -75,6 +75,8 @@ struct brcmf_android {
+ 	unsigned int wakelock_counter;
+ 	unsigned int wakelock_waive_counter;
+ 	u16 pkt_filter_list;
++	void *fw_mem_dump;
++	size_t fw_mem_dump_len;
+ };
+ #endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+index 074caad23a77..ca3a58195984 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+@@ -19,6 +19,7 @@
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ #include <linux/wakelock.h>
+ #include "android.h"
++#include "bus.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+ #if defined(CONFIG_BRCMFMAC_ANDROID)
+@@ -104,7 +105,7 @@ static int brcmf_cfg80211_vndr_cmds_dcmd_handler(struct wiphy *wiphy,
+ 		ret_len -= msglen;
+ 		payload = msglen + sizeof(msglen);
+ 		reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, payload);
+-		if (NULL == reply) {
++		if (!reply) {
+ 			ret = -ENOMEM;
+ 			break;
+ 		}
+@@ -207,12 +208,19 @@ brcmf_cfg80211_gscan_get_channel_list_handler(struct wiphy *wiphy,
+ 	reply =
+ 	    cfg80211_vendor_cmd_alloc_reply_skb(wiphy, ((num_channels + 1) *
+ 							sizeof(uint)));
++	if (!reply) {
++		ret = -ENOMEM;
++		goto skb_alloc_failed;
++	}
++
+ 	nla_put_u32(reply, GSCAN_ATTRIBUTE_NUM_CHANNELS, num_channels);
+ 	nla_put(reply, GSCAN_ATTRIBUTE_CHANNEL_LIST,
+ 		num_channels * sizeof(uint), channels);
+ 	ret = cfg80211_vendor_cmd_reply(reply);
+ 
++skb_alloc_failed:
+ 	vfree(channels);
++
+ exit:
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_android_wake_unlock(ifp->drvr);
+@@ -260,9 +268,15 @@ brcmf_cfg80211_andr_get_feature_set_handler(struct wiphy *wiphy,
+ 
+ 	}
+ 	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(int));
++	if (!reply) {
++		ret = -ENOMEM;
++		goto exit;
++	}
++
+ 	nla_put_nohdr(reply, sizeof(int), &feature_set);
+ 	ret = cfg80211_vendor_cmd_reply(reply);
+ 
++exit:
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_android_wake_unlock(ifp->drvr);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+@@ -358,6 +372,7 @@ brcmf_cfg80211_andr_set_rand_mac_oui(struct wiphy *wiphy,
+ 
+ exit:
+ 	brcmf_android_wake_unlock(ifp->drvr);
++
+ 	return ret;
+ }
+ 
+@@ -384,8 +399,72 @@ brcmf_cfg80211_andr_dbg_trigger_mem_dump(struct wiphy *wiphy,
+ 					 struct wireless_dev *wdev,
+ 					 const void  *data, int len)
+ {
+-	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
+-	return -ENOTSUPP;
++	struct brcmf_android *android;
++	struct brcmf_cfg80211_vif *vif;
++	struct brcmf_if *ifp;
++	struct brcmf_bus *bus;
++	struct sk_buff *reply;
++	void *dump;
++	size_t ramsize;
++	int err;
++
++	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
++	ifp = vif->ifp;
++	if (!ifp || !ifp->drvr || !ifp->drvr->bus_if || !ifp->drvr->android)
++		return -ENODEV;
++
++	brcmf_android_wake_lock(ifp->drvr);
++
++	bus = ifp->drvr->bus_if;
++	android = ifp->drvr->android;
++
++	if (android->fw_mem_dump) {
++		vfree(android->fw_mem_dump);
++		android->fw_mem_dump = NULL;
++		android->fw_mem_dump_len = 0;
++	}
++
++	ramsize = brcmf_bus_get_ramsize(bus);
++	if (!ramsize) {
++		err = -ENOTSUPP;
++		goto exit;
++	}
++
++	dump = vzalloc(ramsize);
++	if (!dump) {
++		err = -ENOMEM;
++		goto exit;
++	}
++
++	err = brcmf_bus_get_memdump(bus, dump, ramsize);
++	if (err) {
++		err = -EIO;
++		goto free_mem;
++	}
++
++	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(u32));
++	if (!reply) {
++		err = -ENOMEM;
++		goto free_mem;
++	}
++
++	nla_put_u32(reply, DEBUG_ATTRIBUTE_FW_DUMP_LEN, (u32)ramsize);
++
++	err = cfg80211_vendor_cmd_reply(reply);
++	if (err)
++		goto free_mem;
++
++	android->fw_mem_dump = dump;
++	android->fw_mem_dump_len = ramsize;
++
++free_mem:
++	if (err)
++		vfree(dump);
++
++exit:
++	brcmf_android_wake_unlock(ifp->drvr);
++
++	return err;
+ }
+ 
+ static int
+@@ -393,8 +472,78 @@ brcmf_cfg80211_andr_dbg_get_mem_dump(struct wiphy *wiphy,
+ 				     struct wireless_dev *wdev,
+ 				     const void *data, int len)
+ {
+-	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
+-	return -ENOTSUPP;
++	struct brcmf_android *android;
++	struct brcmf_cfg80211_vif *vif;
++	struct brcmf_if *ifp;
++	struct brcmf_bus *bus;
++	struct sk_buff *reply;
++	const struct nlattr *iter;
++	int type;
++	int rem;
++	int err = 0;
++	void *user_buf = NULL;
++	u32 user_buf_len = 0;
++
++	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
++	ifp = vif->ifp;
++	if (!ifp || !ifp->drvr || !ifp->drvr->bus_if || !ifp->drvr->android)
++		return -ENODEV;
++
++	brcmf_android_wake_lock(ifp->drvr);
++
++	bus = ifp->drvr->bus_if;
++	android = ifp->drvr->android;
++
++	nla_for_each_attr(iter, data, len, rem) {
++		type = nla_type(iter);
++		switch (type) {
++		case DEBUG_ATTRIBUTE_FW_DUMP_LEN:
++			user_buf_len = nla_get_u32(iter);
++			if (user_buf_len > android->fw_mem_dump_len)
++				user_buf_len = android->fw_mem_dump_len;
++			break;
++		case DEBUG_ATTRIBUTE_FW_DUMP_DATA:
++			user_buf = (void *)(unsigned long)nla_get_u64(iter);
++			break;
++		default:
++			brcmf_err("Unknown type: %d\n", type);
++			err = -EINVAL;
++			goto exit;
++		}
++	}
++	if (user_buf_len == 0 || !user_buf) {
++		err = -EINVAL;
++		goto exit;
++	}
++
++	if (android->fw_mem_dump_len == 0 || !android->fw_mem_dump) {
++		err = -ENODATA;
++		goto exit;
++	}
++
++	err = copy_to_user(user_buf, android->fw_mem_dump, user_buf_len);
++	if (err)
++		goto exit;
++
++	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(int));
++	if (!reply) {
++		err = -ENOMEM;
++		goto exit;
++	}
++	nla_put(reply, DEBUG_ATTRIBUTE_FW_DUMP_DATA, sizeof(int), &err);
++	err = cfg80211_vendor_cmd_reply(reply);
++	if (err)
++		goto exit;
++
++exit:
++	if (android->fw_mem_dump) {
++		vfree(android->fw_mem_dump);
++		android->fw_mem_dump = NULL;
++		android->fw_mem_dump_len = 0;
++	}
++	brcmf_android_wake_unlock(ifp->drvr);
++
++	return err;
+ }
+ 
+ static int
+@@ -453,10 +602,16 @@ brcmf_cfg80211_andr_dbg_get_version(struct wiphy *wiphy,
+ 	}
+ 	brcmf_dbg(INFO, "Version : %s\n", buf);
+ 	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, strlen(buf));
++	if (!reply) {
++		ret = -ENOMEM;
++		goto exit;
++	}
+ 	nla_put_nohdr(reply, strlen(buf), buf);
+ 	ret = cfg80211_vendor_cmd_reply(reply);
++
+ exit:
+ 	brcmf_android_wake_unlock(ifp->drvr);
++
+ 	return ret;
+ }
+ 
+@@ -495,21 +650,29 @@ brcmf_cfg80211_andr_dbg_get_feature(struct wiphy *wiphy,
+ 
+ 	brcmf_android_wake_lock(ifp->drvr);
+ 
+-	ret = brcmf_fil_iovar_data_get(ifp, "cap", caps, sizeof(caps));
++	/* Add firmware memory dump feature in default */
++	supported_features |= DBG_MEMORY_DUMP_SUPPORTED;
+ 
+-	if (ret) {
++	/* Query firmware features */
++	ret = brcmf_fil_iovar_data_get(ifp, "cap", caps, sizeof(caps));
++	if (!ret) {
++		if (strnstr(caps, "logtrace", sizeof(caps))) {
++			supported_features |= DBG_CONNECT_EVENT_SUPPORTED;
++			supported_features |= DBG_VERBOSE_LOG_SUPPORTED;
++		}
++	} else {
+ 		brcmf_err("get capa error, ret = %d\n", ret);
+-		goto exit;
+ 	}
+ 
+-	if (strnstr(caps, "logtrace", sizeof(caps))) {
+-		supported_features |= DBG_CONNECT_EVENT_SUPPORTED;
+-		supported_features |= DBG_VERBOSE_LOG_SUPPORTED;
++	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(u32));
++	if (!reply) {
++		ret = -ENOMEM;
++		goto exit;
+ 	}
+ 
+-	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(u32));
+ 	nla_put_nohdr(reply, sizeof(u32), &supported_features);
+ 	ret = cfg80211_vendor_cmd_reply(reply);
++
+ exit:
+ 	brcmf_android_wake_unlock(ifp->drvr);
+ 
+@@ -546,10 +709,16 @@ brcmf_cfg80211_andr_apf_get_capabilities(struct wiphy *wiphy,
+ 	ver = 0;
+ 
+ 	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(int));
++	if (!reply) {
++		ret = -ENOMEM;
++		goto exit;
++	}
+ 	nla_put_u32(reply, APF_ATTRIBUTE_VERSION, ver);
+ 	ret = cfg80211_vendor_cmd_reply(reply);
+ 
++exit:
+ 	brcmf_android_wake_unlock(ifp->drvr);
++
+ 	return ret;
+ }
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
+index 4a798c97fde2..ec050a4587a8 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
+@@ -215,7 +215,7 @@ enum debug_attributes {
+ 	DEBUG_ATTRIBUTE_LOG_LEVEL,
+ 	DEBUG_ATTRIBUTE_LOG_TIME_INTVAL,
+ 	DEBUG_ATTRIBUTE_LOG_MIN_DATA_SIZE,
+-	DEBUG_ATTRIBUTE_DUMP_FILENAME,
++	//DEBUG_ATTRIBUTE_DUMP_FILENAME,
+ 	DEBUG_ATTRIBUTE_FW_DUMP_LEN,
+ 	DEBUG_ATTRIBUTE_FW_DUMP_DATA,
+ 	DEBUG_ATTRIBUTE_RING_DATA,
+-- 
+2.25.0
+

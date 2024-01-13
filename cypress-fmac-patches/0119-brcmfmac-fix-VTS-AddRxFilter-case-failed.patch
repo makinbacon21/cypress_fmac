@@ -1,0 +1,41 @@
+From e87737fec70ce18cef41d392238fa6f09e12dfc0 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Thu, 28 May 2020 21:28:26 -0500
+Subject: [PATCH 119/130] brcmfmac: fix VTS AddRxFilter case failed
+
+We got below cases failed because FMAC returned error when adding existing
+RX filter. Therefore, we should remove existing filter ID before adding a
+new one.
+
+Test Module:
+    arm64-v8a VtsHalWifiSupplicantV1_0Host
+Test Case:
+    SupplicantStaIfaceHidlTest.AddRxFilter_64bit
+Error Detail:
+    supplicant_sta_iface_hidl_test.cpp:358
+
+Verified: VtsHalWifiSupplicantV1_0Host VTS
+
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index 9b403177704f..a90140b432a3 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -1791,6 +1791,9 @@ brcmf_pktfilter_add_remove(struct net_device *ndev, int filter_num, bool add)
+ 		  pkt_filter->u.pattern.size_bytes * 2;
+ 
+ 	if (add) {
++		/* Delete existing ID */
++		brcmf_fil_iovar_int_set(ifp, "pkt_filter_delete",
++					pkt_filter->id);
+ 		/* Add filter */
+ 		ifp->fwil_fwerr = true;
+ 		ret = brcmf_fil_iovar_data_set(ifp, "pkt_filter_add",
+-- 
+2.25.0
+

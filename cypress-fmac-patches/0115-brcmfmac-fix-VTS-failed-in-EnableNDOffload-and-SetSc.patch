@@ -1,0 +1,193 @@
+From 9cf150c0321c131cd8a84b4ce3d734b1ab13ad47 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Tue, 14 Jan 2020 01:20:04 -0600
+Subject: [PATCH 115/130] brcmfmac: fix VTS failed in EnableNDOffload and
+ SetSccanningMacOui
+
+1. Implement Android CONFIG_ND_OFFLOAD subcommand to fix EnableNDOffload
+   VTS failed.
+2. SetSccanningMacOui failed is caused by pfn_macaddr iovar error.
+   We fix it by putting correct pfn structure into iovar.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../broadcom/brcm80211/brcmfmac/cfg80211.h    |  2 -
+ .../broadcom/brcm80211/brcmfmac/vendor.c      | 69 +++++++++++++++++--
+ .../broadcom/brcm80211/brcmfmac/vendor.h      | 28 ++++++++
+ 3 files changed, 90 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.h
+index f599a0a1347b..8f9007db8454 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.h
+@@ -544,9 +544,7 @@ int brcmf_setup_wiphybands(struct brcmf_cfg80211_info *cfg);
+ struct brcmf_if *brcmf_cfg80211_register_if(struct device *dev,
+ 					    struct brcmf_mp_device *settings);
+ #endif
+-
+ s32 brcmf_cfg80211_set_ap_wps_p2p_ie(struct brcmf_cfg80211_vif *vif,
+ 				     char *buf, int len,
+ 				     enum brcmf_pktype type);
+-
+ #endif /* BRCMFMAC_CFG80211_H */
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+index ca3a58195984..d73a1cc48773 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+@@ -331,10 +331,10 @@ brcmf_cfg80211_andr_set_rand_mac_oui(struct wiphy *wiphy,
+ {
+ 	struct brcmf_cfg80211_vif *vif;
+ 	struct brcmf_if *ifp;
++	struct brcmf_pfn_macaddr_cfg pfn_cfg;
+ 	int ret = 0;
+ 	int type;
+ 	char *oui;
+-	char rand_mac_oui[DOT11_OUI_LEN];
+ 
+ 	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
+ 	ifp = vif->ifp;
+@@ -352,20 +352,25 @@ brcmf_cfg80211_andr_set_rand_mac_oui(struct wiphy *wiphy,
+ 		}
+ 
+ 		oui = nla_data(data);
+-		memcpy(rand_mac_oui, oui, DOT11_OUI_LEN);
++		memcpy(&pfn_cfg.macaddr, oui, DOT11_OUI_LEN);
+ 		/* Clear multi bit */
+-		rand_mac_oui[0] &= 0xFE;
++		pfn_cfg.macaddr.octet[0] &= 0xFE;
+ 		/* Set locally administered */
+-		rand_mac_oui[0] |= 0x02;
++		pfn_cfg.macaddr.octet[0] |= 0x02;
++
++		/* Set version and flags */
++		pfn_cfg.ver = BRCMF_PFN_MACADDR_CFG_VER;
++		pfn_cfg.flags = (BRCMF_PFN_MAC_OUI_ONLY_MASK |
++				 BRCMF_PFN_SET_MAC_UNASSOC_MASK);
++
+ 		ret = brcmf_fil_iovar_data_set(ifp, "pfn_macaddr",
+-					       &rand_mac_oui,
+-					       sizeof(rand_mac_oui));
++					       &pfn_cfg, sizeof(pfn_cfg));
+ 		if (ret) {
+ 			brcmf_err("pfn_macaddr failed, err=%d\n", ret);
+ 			goto exit;
+ 		}
+ 		brcmf_dbg(INFO, "configured random mac: mac=%pM\n",
+-			  rand_mac_oui);
++				  pfn_cfg.macaddr.octet);
+ 	} else {
+ 		ret = -EINVAL;
+ 	}
+@@ -376,6 +381,45 @@ brcmf_cfg80211_andr_set_rand_mac_oui(struct wiphy *wiphy,
+ 	return ret;
+ }
+ 
++static int
++brcmf_cfg80211_andr_config_nd_offload(struct wiphy *wiphy,
++				      struct wireless_dev *wdev,
++				      const void  *data, int len)
++{
++	struct brcmf_cfg80211_vif *vif;
++	struct brcmf_if *ifp;
++	int ret = 0, rem, type;
++	const struct nlattr *iter;
++	bool enable = false;
++
++	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
++	if (!vif || !vif->ifp)
++		return -EFAULT;
++	ifp = vif->ifp;
++
++	brcmf_android_wake_lock(ifp->drvr);
++
++	nla_for_each_attr(iter, data, len, rem) {
++		type = nla_type(iter);
++		switch (type) {
++		case ANDR_WIFI_ATTRIBUTE_ND_OFFLOAD_VALUE:
++			enable = nla_get_u8(iter);
++			break;
++
++		default:
++			brcmf_err("Unknown type: %d\n", type);
++			ret = -EINVAL;
++			goto exit;
++		}
++	}
++
++	brcmf_configure_arp_nd_offload(ifp, enable);
++exit:
++	brcmf_android_wake_unlock(ifp->drvr);
++
++	return ret;
++}
++
+ static int
+ brcmf_cfg80211_andr_dbg_start_logging(struct wiphy *wiphy,
+ 				      struct wireless_dev *wdev,
+@@ -838,6 +882,17 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
+ 		.policy = VENDOR_CMD_RAW_DATA,
+ 		.doit = brcmf_cfg80211_andr_set_rand_mac_oui
+ 	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = ANDR_WIFI_SUBCMD_CONFIG_ND_OFFLOAD
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_config_nd_offload
++	},
++
+ 	/* DEBUG ABILITY */
+ 	{
+ 		{
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
+index ec050a4587a8..e8afd783af81 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
+@@ -66,6 +66,25 @@ struct brcmf_vndr_dcmd_hdr {
+ 	uint magic;
+ };
+ 
++/**
++ * struct brcmf_pfn_macaddr_cfg - message header for PFN MAC address config
++ *
++ * @ver: version of configuration structure
++ * @flags: PFN settings
++ * @macaddr: MAC address for PFN
++ */
++struct brcmf_pfn_macaddr_cfg {
++	u8 ver;
++	u8 flags;
++	struct ether_addr macaddr;
++};
++
++#define BRCMF_PFN_MACADDR_CFG_VER			1
++#define BRCMF_PFN_MAC_OUI_ONLY_MASK			0x1
++#define BRCMF_PFN_SET_MAC_UNASSOC_MASK		0x2
++#define BRCMF_PFN_RESTRICT_LA_MAC_MASK		0x4
++#define BRCMF_PFN_MACADDR_FLAG_MASK			0x7
++
+ extern const struct wiphy_vendor_command brcmf_vendor_cmds[];
+ extern const struct nl80211_vendor_cmd_info brcmf_vendor_events[];
+ s32 brcmf_wiphy_phy_temp_evt_handler(struct brcmf_if *ifp,
+@@ -140,6 +159,15 @@ enum andr_vendor_subcmd {
+ 	ANDR_WIFI_RANDOM_MAC_OUI,
+ 	ANDR_WIFI_NODFS_CHANNELS,
+ 	ANDR_WIFI_SET_COUNTRY,
++	GSCAN_SUBCMD_SET_EPNO_SSID,
++	ANDR_WIFI_SUBCMD_SET_SSID_WHITE_LIST,
++	ANDR_WIFI_SUBCMD_SET_ROAM_PARAMS,
++	ANDR_WIFI_SUBCMD_ENABLE_LAZY_ROAM,
++	ANDR_WIFI_SUBCMD_SET_BSSID_PREF,
++	ANDR_WIFI_SUBCMD_SET_BSSID_BLACKLIST,
++	GSCAN_SUBCMD_ANQPO_CONFIG,
++	ANDR_WIFI_SUBCMD_SET_RSSI_MONITOR,
++	ANDR_WIFI_SUBCMD_CONFIG_ND_OFFLOAD,
+ 
+ 	DEBUG_START_LOGGING = ANDROID_NL80211_SUBCMD_DEBUG_RANGE_START,
+ 	DEBUG_TRIGGER_MEM_DUMP,
+-- 
+2.25.0
+

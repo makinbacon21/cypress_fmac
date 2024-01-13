@@ -1,0 +1,40 @@
+From e3ac5ca83208dfa03c3b8d43ae1583f54d43b77a Mon Sep 17 00:00:00 2001
+From: Chung-Hsien Hsu <stanley.hsu@cypress.com>
+Date: Tue, 18 Feb 2020 00:58:15 -0600
+Subject: [PATCH 087/130] brcmfmac: fix NULL pointer dereference issue in
+ brcmf_cfg80211_set_pmk()
+
+Fix the kernel NULL pointer derference issue in
+brcmf_cfg80211_set_pmk(), caused by commit 3d4c4879d4e2 ("brcmfmac: add
+support for Opportunistic Key Caching").
+
+Fixes: 3d4c4879d4e2 ("brcmfmac: add support for Opportunistic Key
+Caching")
+Signed-off-by: Chung-Hsien Hsu <stanley.hsu@cypress.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index 7b9039cb0f63..557a3e69071b 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -5430,13 +5430,14 @@ static int brcmf_cfg80211_set_pmk(struct wiphy *wiphy, struct net_device *dev,
+ 				  const struct cfg80211_pmk_conf *conf)
+ {
+ 	struct brcmf_if *ifp;
+-	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_pub *drvr;
+ 	int ret;
+ 
+ 	brcmf_dbg(TRACE, "enter\n");
+ 
+ 	/* expect using firmware supplicant for 1X */
+ 	ifp = netdev_priv(dev);
++	drvr = ifp->drvr;
+ 	if (WARN_ON(ifp->vif->profile.use_fwsup != BRCMF_PROFILE_FWSUP_1X))
+ 		return -EINVAL;
+ 
+-- 
+2.25.0
+

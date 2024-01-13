@@ -1,0 +1,196 @@
+From 321092c47bb300279a887d2a2345e460d205cdb8 Mon Sep 17 00:00:00 2001
+From: "Ethan Kim(Youngic)" <youngsic.kim@cypress.com>
+Date: Tue, 16 Jul 2019 03:38:37 -0500
+Subject: [PATCH 111/130] brcmfmac: Android VTS fixed for capabilities
+
+ The return size of cap is over 256.
+ These are relevant failure cases:
+  WifiChipHidlTest.GetCapabilities
+  WifiStaIfaceHidlTest.GetBackgroundScanCapabilities
+
+
+Signed-off-by: Ethan Kim(Youngic) <youngsic.kim@cypress.com>
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../broadcom/brcm80211/brcmfmac/core.h        |  3 ++
+ .../broadcom/brcm80211/brcmfmac/feature.c     | 33 ++++++++++++----
+ .../broadcom/brcm80211/brcmfmac/feature.h     |  9 ++++-
+ .../broadcom/brcm80211/brcmfmac/vendor.c      | 38 ++++++-------------
+ 4 files changed, 49 insertions(+), 34 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.h
+index 33e33f7749d5..ec5d3f23ca43 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.h
+@@ -40,6 +40,9 @@
+ 
+ #define NDOL_MAX_ENTRIES	8
+ 
++/* Length of firmware feature string */
++#define BRCMF_MAX_FEATURE_STR 512
++
+ /**
+  * struct brcmf_ampdu_rx_reorder - AMPDU receive reorder info
+  *
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
+index b9ae7785b43e..a1e9caafc67f 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
+@@ -41,6 +41,13 @@ static const struct brcmf_feat_fwcap brcmf_fwcap_map[] = {
+ 	{ BRCMF_FEAT_DOT11H, "802.11h" },
+ 	{ BRCMF_FEAT_SAE, "sae" },
+ 	{ BRCMF_FEAT_FWAUTH, "idauth" },
++	{ BRCMF_FEAT_STA, "sta" },
++	{ BRCMF_FEAT_DUALBAND, "dualband" },
++	{ BRCMF_FEAT_TDLS, "tdls" },
++	{ BRCMF_FEAT_VSDB, "vsdb" },
++	{ BRCMF_FEAT_NAN, "nan" },
++	{ BRCMF_FEAT_D2DRTT, "d2drtt" },
++	{ BRCMF_FEAT_AP, "ap" },
+ };
+ 
+ #ifdef DEBUG
+@@ -177,26 +184,38 @@ static void brcmf_feat_iovar_data_set(struct brcmf_if *ifp,
+ static void brcmf_feat_firmware_capabilities(struct brcmf_if *ifp)
+ {
+ 	struct brcmf_pub *drvr = ifp->drvr;
+-	char caps[MAX_CAPS_BUFFER_SIZE];
++	char *caps;
+ 	enum brcmf_feat_id id;
+-	int i, err;
++	int i, err = 0;
+ 
+-	err = brcmf_fil_iovar_data_get(ifp, "cap", caps, sizeof(caps));
+-	if (err) {
+-		bphy_err(drvr, "could not get firmware cap (%d)\n", err);
+-		return;
++	caps = kzalloc(BRCMF_MAX_FEATURE_STR, GFP_KERNEL);
++	if (!caps) {
++		err = -ENOMEM;
++		goto exit;
+ 	}
+ 
++	err = brcmf_fil_iovar_data_get(ifp, "cap", caps, BRCMF_MAX_FEATURE_STR);
++	if (err)
++		goto exit;
++
+ 	brcmf_dbg(INFO, "[ %s]\n", caps);
+ 
+ 	for (i = 0; i < ARRAY_SIZE(brcmf_fwcap_map); i++) {
+-		if (strnstr(caps, brcmf_fwcap_map[i].fwcap_id, sizeof(caps))) {
++		if (strnstr(caps, brcmf_fwcap_map[i].fwcap_id,
++			    BRCMF_MAX_FEATURE_STR)) {
+ 			id = brcmf_fwcap_map[i].feature;
+ 			brcmf_dbg(INFO, "enabling feature: %s\n",
+ 				  brcmf_feat_names[id]);
+ 			ifp->drvr->feat_flags |= BIT(id);
+ 		}
+ 	}
++
++exit:
++	kfree(caps);
++
++	if (err)
++		brcmf_err("could not get firmware cap (%d)\n", err);
++	return;
+ }
+ 
+ /**
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.h
+index 56d991cae1d0..89ecf73a9947 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.h
+@@ -49,7 +49,14 @@
+ 	BRCMF_FEAT_DEF(MONITOR_FMT_HW_RX_HDR) \
+ 	BRCMF_FEAT_DEF(DOT11H) \
+ 	BRCMF_FEAT_DEF(SAE) \
+-	BRCMF_FEAT_DEF(FWAUTH)
++	BRCMF_FEAT_DEF(FWAUTH) \
++	BRCMF_FEAT_DEF(STA) \
++	BRCMF_FEAT_DEF(DUALBAND) \
++	BRCMF_FEAT_DEF(VSDB) \
++	BRCMF_FEAT_DEF(NAN) \
++	BRCMF_FEAT_DEF(D2DRTT) \
++	BRCMF_FEAT_DEF(AP) \
++	BRCMF_FEAT_DEF(WME)
+ 
+ /*
+  * Quirks:
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+index 9e4708c0ae79..41fc276dd55f 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+@@ -16,6 +16,7 @@
+ #include "cfg80211.h"
+ #include "vendor.h"
+ #include "fwil.h"
++#include "feature.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+@@ -331,7 +332,6 @@ brcmf_cfg80211_andr_get_feature_set_handler(struct wiphy *wiphy,
+ 	struct sk_buff *reply;
+ 	int ret;
+ 	int feature_set = 0;
+-	char caps[256];
+ 
+ 	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
+ 	ifp = vif->ifp;
+@@ -341,43 +341,29 @@ brcmf_cfg80211_andr_get_feature_set_handler(struct wiphy *wiphy,
+ 
+ 	brcmf_dbg(TRACE, "ifidx=%d, enter\n", ifp->ifidx);
+ 
+-	ret = brcmf_fil_iovar_data_get(ifp, "cap", caps, sizeof(caps));
+-	if (ret) {
+-		brcmf_err("get capa error, ret = %d\n", ret);
+-		goto exit;
+-	}
+-
+-	if (strnstr(caps, "sta", sizeof(caps)))
++	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_STA))
+ 		feature_set |= WIFI_FEATURE_INFRA;
+-	if (strnstr(caps, "dualband", sizeof(caps)))
++	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_DUALBAND))
+ 		feature_set |= WIFI_FEATURE_INFRA_5G;
+-	if (strnstr(caps, "p2p", sizeof(caps)))
++	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_P2P))
+ 		feature_set |= WIFI_FEATURE_P2P;
++	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_TDLS))
++		feature_set |= WIFI_FEATURE_TDLS;
++	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_VSDB))
++		feature_set |= WIFI_FEATURE_TDLS_OFFCHANNEL;
+ 	if (wdev->iftype == NL80211_IFTYPE_AP ||
+ 	    wdev->iftype == NL80211_IFTYPE_P2P_GO)
+ 		feature_set |= WIFI_FEATURE_SOFT_AP;
+-	if (strnstr(caps, "tdls", sizeof(caps)))
+-		feature_set |= WIFI_FEATURE_TDLS;
+-	if (strnstr(caps, "vsdb", sizeof(caps)))
+-		feature_set |= WIFI_FEATURE_TDLS_OFFCHANNEL;
+-	if (strnstr(caps, "nan", sizeof(caps))) {
++	if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_NAN)) {
+ 		feature_set |= WIFI_FEATURE_NAN;
+-		if (strnstr(caps, "rttd2d", sizeof(caps)))
++		if (brcmf_feat_is_enabled(ifp, BRCMF_FEAT_D2DRTT))
+ 			feature_set |= WIFI_FEATURE_D2D_RTT;
++
+ 	}
+-	/* TODO:
+-	 * RTT_SUPPORT
+-	 * LINKSTAT_SUPPORT
+-	 * PNO_SUPPORT
+-	 * GSCAN_SUPPORT
+-	 * RSSI_MONITOR_SUPPORT
+-	 * WL11U
+-	 * NDO_CONFIG_SUPPORT
+-	 */
+ 	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(int));
+ 	nla_put_nohdr(reply, sizeof(int), &feature_set);
+ 	ret = cfg80211_vendor_cmd_reply(reply);
+-exit:
++
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_android_wake_unlock(ifp->drvr);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+-- 
+2.25.0
+

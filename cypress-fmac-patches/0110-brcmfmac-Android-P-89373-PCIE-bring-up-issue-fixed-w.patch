@@ -1,0 +1,160 @@
+From 989288bd52fe320f1a9d8674a08b0b18c857e5e8 Mon Sep 17 00:00:00 2001
+From: "Ethan Kim(Youngic)" <youngsic.kim@cypress.com>
+Date: Mon, 8 Apr 2019 00:20:57 -0500
+Subject: [PATCH 110/130] brcmfmac: Android P 89373-PCIE bring-up issue fixed
+ with WLREG_ON
+
+1. wifi_card_detect() which is indicated ONLY the support on iMX platform.
+   Therefore HiKey960/970 or others will not be possible, thus need to
+   remove it by defined(CONFIG_BRCMFMAC_CARD_DETECT).
+2. Since fmac driver for Android are BRCMFMAC_ANDROID on i.MX platform
+   has kernel panic happened with CONFIG_BRCMFMAC_PCIE=y and
+   CONFIG_BRCMFMAC_SDIO=y if PCIE interface device is detected with called
+   to wifi_card_detect() in kernel's sdhci-esdhc-imx.c.
+3. Add CONFIG_BRCMFMAC_CARD_DETECT to follow it up in Kconfig
+
+
+Signed-off-by: Ethan Kim(Youngic) <youngsic.kim@cypress.com>
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../net/wireless/broadcom/brcm80211/Kconfig   |  9 +++++++
+ .../broadcom/brcm80211/brcmfmac/common.c      | 21 +++++++++-------
+ .../broadcom/brcm80211/brcmfmac/core.c        | 24 ++++++++++++++-----
+ .../broadcom/brcm80211/brcmfmac/core.h        |  4 +++-
+ 4 files changed, 42 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/Kconfig b/drivers/net/wireless/broadcom/brcm80211/Kconfig
+index 06d1483892d7..ed773418cc71 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/Kconfig
++++ b/drivers/net/wireless/broadcom/brcm80211/Kconfig
+@@ -54,3 +54,12 @@ config BRCMFMAC_ANDROID
+ 	depends on BRCMFMAC
+ 	help
+ 	  If you say Y here, the FMAC driver will support Android mode
++
++config BRCMFMAC_CARD_DETECT
++	bool "Enable specific platform's API with brcmfmac android"
++	depends on BRCMFMAC_ANDROID
++	depends on BRCMFMAC_SDIO
++	help
++	  If you say Y here, specific wifi_card_detect() API will
++	  enable when platform_driver or power cycle on/off call.
++	  This feature indicate for specific(e.g. I.MX) kernel.
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+index 8cbf1225f6f0..c0039f3565fe 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+@@ -538,8 +538,13 @@ static int __init brcmf_common_pd_probe(struct platform_device *pdev)
+ 
+ 	brcmfmac_pdata = dev_get_platdata(&pdev->dev);
+ 
+-	if (brcmfmac_pdata && brcmfmac_pdata->power_on) {
+-		brcmfmac_pdata->power_on();
++	if (brcmfmac_pdata) {
++		if (brcmfmac_pdata->power_on) {
++			brcmfmac_pdata->power_on();
++		} else {
++			brcmf_err("Platform doesn't support power on\n");
++			return -EIO;
++		}
+ 	} else {
+ 		if (!wifi_regulator) {
+ 			wifi_regulator = regulator_get(&pdev->dev, "wlreg_on");
+@@ -557,12 +562,10 @@ static int __init brcmf_common_pd_probe(struct platform_device *pdev)
+ 			regulator_disable(wifi_regulator);
+ 			return -EIO;
+ 		}
+-#ifdef CONFIG_BRCMFMAC_ANDROID
++#if defined(CONFIG_BRCMFMAC_SDIO) && defined(CONFIG_BRCMFMAC_CARD_DETECT)
+ 		wifi_card_detect(true);
+-#endif /* CONFIG_BRCMFMAC_ANDROID */
++#endif
+ 	}
+-
+-
+ 	return 0;
+ }
+ 
+@@ -574,13 +577,13 @@ static int brcmf_common_pd_remove(struct platform_device *pdev)
+ 		brcmfmac_pdata->power_off();
+ 	} else if (wifi_regulator) {
+ 		regulator_disable(wifi_regulator);
+-#ifdef CONFIG_BRCMFMAC_ANDROID
++#if defined(CONFIG_BRCMFMAC_SDIO) && defined(CONFIG_BRCMFMAC_CARD_DETECT)
+ 		wifi_card_detect(false);
+-#endif /* CONFIG_BRCMFMAC_ANDROID */
++#endif
+ 		regulator_put(wifi_regulator);
+ 		wifi_regulator = NULL;
++		}
+ 	}
+-
+ 	return 0;
+ }
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index 7bc797715c8f..49d59b9389ce 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -1967,10 +1967,22 @@ int brcmf_set_power(bool on, unsigned long msec)
+ {
+ 	brcmf_dbg(TRACE, "power %s\n", (on ? "on" : "off"));
+ 
+-	if (on && brcmfmac_pdata && brcmfmac_pdata->power_on) {
+-		brcmfmac_pdata->power_on();
+-	} else if (!on && brcmfmac_pdata && brcmfmac_pdata->power_off) {
+-		brcmfmac_pdata->power_off();
++	if (brcmfmac_pdata) {
++		if (on) {
++			if (brcmfmac_pdata->power_on) {
++				brcmfmac_pdata->power_on();
++			} else {
++				brcmf_err("Platform doesn't support power on\n");
++				return -EIO;
++			}
++		} else {
++			if (brcmfmac_pdata->power_off) {
++				brcmfmac_pdata->power_off();
++			} else {
++				brcmf_err("Platform doesn't support power off\n");
++				return -EIO;
++			}
++		}
+ 	} else {
+ 		if (!wifi_regulator) {
+ 			brcmf_err("cannot get wifi regulator\n");
+@@ -1983,14 +1995,14 @@ int brcmf_set_power(bool on, unsigned long msec)
+ 				return -EIO;
+ 			}
+ 			msleep(msec);
+-#ifdef CONFIG_BRCMFMAC_SDIO
++#if defined(CONFIG_BRCMFMAC_SDIO) && defined(CONFIG_BRCMFMAC_CARD_DETECT)
+ 			wifi_card_detect(true);
+ #endif
+ #ifdef CONFIG_BRCMFMAC_PCIE
+ 			brcmf_pcie_register();
+ #endif
+ 		} else {
+-#ifdef CONFIG_BRCMFMAC_SDIO
++#if defined(CONFIG_BRCMFMAC_SDIO) && defined(CONFIG_BRCMFMAC_CARD_DETECT)
+ 			wifi_card_detect(false);
+ #endif
+ #ifdef CONFIG_BRCMFMAC_PCIE
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.h
+index 489d8c58c4c1..33e33f7749d5 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.h
+@@ -247,7 +247,9 @@ struct brcmf_sta *brcmf_findadd_sta(struct brcmf_if *ifp, const u8 *ea);
+ int brcmf_set_country(struct net_device *ndev, char *country);
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ int brcmf_set_power(bool on, unsigned long msec);
+-void wifi_card_detect(bool on);
+ void brcmf_wake_dev_reset_waitq(struct brcmf_pub *drvr, int status);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
++#if defined(CONFIG_BRCMFMAC_SDIO) && defined(CONFIG_BRCMFMAC_CARD_DETECT)
++void wifi_card_detect(bool on);
++#endif
+ #endif /* BRCMFMAC_CORE_H */
+-- 
+2.25.0
+

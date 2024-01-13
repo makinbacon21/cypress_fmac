@@ -1,0 +1,78 @@
+From ad8d2315c71b53256d5cd03374f01a550f5a96ce Mon Sep 17 00:00:00 2001
+From: Double Lo <double.lo@cypress.com>
+Date: Mon, 2 Mar 2020 23:55:13 -0600
+Subject: [PATCH 090/130] brcmfmac: fix MFG firmware load fail
+
+Don't unload driver when set packet filter fail due to
+firmware not support.
+
+Signed-off-by: Double Lo <double.lo@cypress.com>
+---
+ .../net/wireless/broadcom/brcm80211/brcmfmac/common.c    | 9 +++++++--
+ .../net/wireless/broadcom/brcm80211/brcmfmac/feature.c   | 1 -
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c  | 3 ++-
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h  | 2 ++
+ 4 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+index fe83a52db381..75beeb4c9548 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+@@ -358,8 +358,13 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
+ 	/* add unicast packet filter */
+ 	err = brcmf_pktfilter_add_remove(ifp->ndev,
+ 					 BRCMF_UNICAST_FILTER_NUM, true);
+-	if (err)
+-		brcmf_info("Add unicast filter error (%d)\n", err);
++	if (err == -BRCMF_FW_UNSUPPORTED) {
++		/* FW not support can be ignored */
++		err = 0;
++		goto done;
++	} else if (err) {
++		bphy_err(drvr, "Add unicast filter error (%d)\n", err);
++	}
+ 
+ done:
+ 	return err;
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
+index 5d08c9d49ee7..b9ae7785b43e 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
+@@ -16,7 +16,6 @@
+ #include "feature.h"
+ #include "common.h"
+ 
+-#define BRCMF_FW_UNSUPPORTED	23
+ 
+ /*
+  * expand feature list to array of feature strings.
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
+index 9ed85420f3ca..6f649a22b674 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
+@@ -117,7 +117,8 @@ brcmf_fil_cmd_data(struct brcmf_if *ifp, u32 cmd, void *data, u32 len, bool set)
+ 	} else if (fwerr < 0) {
+ 		brcmf_dbg(FIL, "Firmware error: %s (%d)\n",
+ 			  brcmf_fil_get_errstr((u32)(-fwerr)), fwerr);
+-		err = -EBADE;
++		if (fwerr != -BRCMF_FW_UNSUPPORTED)
++			err = -EBADE;
+ 	}
+ 	if (ifp->fwil_fwerr)
+ 		return fwerr;
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
+index 0ff6f5212a94..f2e00a3c19e0 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
+@@ -77,6 +77,8 @@
+ #define BRCMF_C_SET_VAR				263
+ #define BRCMF_C_SET_WSEC_PMK			268
+ 
++#define BRCMF_FW_UNSUPPORTED			23
++
+ s32 brcmf_fil_cmd_data_set(struct brcmf_if *ifp, u32 cmd, void *data, u32 len);
+ s32 brcmf_fil_cmd_data_get(struct brcmf_if *ifp, u32 cmd, void *data, u32 len);
+ s32 brcmf_fil_cmd_int_set(struct brcmf_if *ifp, u32 cmd, u32 data);
+-- 
+2.25.0
+

@@ -1,0 +1,46 @@
+From 0ae858defaa6fafd9af9b9f9eff503b73374c91f Mon Sep 17 00:00:00 2001
+From: Double Lo <double.lo@cypress.com>
+Date: Fri, 13 Mar 2020 03:42:19 -0500
+Subject: [PATCH 104/130] brcmfmac: fix 43362 driver load failure
+
+Always retrun -EBADE when firmware error happens.
+If need to get detail firmware error code, use ifp->fwil_fwerr flag.
+
+Signed-off-by: Double Lo <double.lo@cypress.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c | 2 ++
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c | 3 +--
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index 4387b5315ba4..74e69561b31e 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -1618,8 +1618,10 @@ brcmf_pktfilter_add_remove(struct net_device *ndev, int filter_num, bool add)
+ 
+ 	if (add) {
+ 		/* Add filter */
++		ifp->fwil_fwerr = true;
+ 		ret = brcmf_fil_iovar_data_set(ifp, "pkt_filter_add",
+ 					       pkt_filter, buflen);
++		ifp->fwil_fwerr = false;
+ 		if (ret)
+ 			goto failed;
+ 		drvr->pkt_filter[filter_num].id = pkt_filter->id;
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
+index 6f649a22b674..9ed85420f3ca 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
+@@ -117,8 +117,7 @@ brcmf_fil_cmd_data(struct brcmf_if *ifp, u32 cmd, void *data, u32 len, bool set)
+ 	} else if (fwerr < 0) {
+ 		brcmf_dbg(FIL, "Firmware error: %s (%d)\n",
+ 			  brcmf_fil_get_errstr((u32)(-fwerr)), fwerr);
+-		if (fwerr != -BRCMF_FW_UNSUPPORTED)
+-			err = -EBADE;
++		err = -EBADE;
+ 	}
+ 	if (ifp->fwil_fwerr)
+ 		return fwerr;
+-- 
+2.25.0
+

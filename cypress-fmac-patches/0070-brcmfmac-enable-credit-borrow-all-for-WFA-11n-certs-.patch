@@ -1,0 +1,31 @@
+From 1824c40d771ebd09d24781987768475eec5cd9cf Mon Sep 17 00:00:00 2001
+From: Jia-Shyr Chuang <jiac@cypress.com>
+Date: Mon, 23 Dec 2019 02:19:50 -0600
+Subject: [PATCH 070/130] brcmfmac: enable credit borrow all for WFA 11n certs
+ 5.2.27
+
+5.2.27 test fails due to lacking credit for VI. Allow VI to borrow more
+credits from BE and gain higher throughput
+
+Signed-off-by: Jia-Shyr Chuang <jiac@cypress.com>
+Signed-off-by: Chi-Hsien Lin <chi-hsien.lin@cypress.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwsignal.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwsignal.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwsignal.c
+index 768f3b9e6b2d..bed7cac20935 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwsignal.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwsignal.c
+@@ -2263,7 +2263,7 @@ static void brcmf_fws_dequeue_worker(struct work_struct *worker)
+ 		    !fws->bus_flow_blocked) {
+ 			while (brcmf_fws_borrow_credit(fws,
+ 						       fifo - 1, fifo,
+-						       false) == 0) {
++						       true) == 0) {
+ 				skb = brcmf_fws_deq(fws, fifo);
+ 				if (!skb) {
+ 					brcmf_fws_return_credits(fws, fifo, 1);
+-- 
+2.25.0
+

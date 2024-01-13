@@ -1,0 +1,30 @@
+From ed676ca55434d14727e7671d1c0f2b51278f8b11 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Tue, 23 Jun 2020 09:24:50 -0500
+Subject: [PATCH 125/130] brcmfmac: remove I_CHIPACTIVE from interrupt mask
+
+To saving more power, we reduce some unnecessary interrupts by removing
+I_CHIPACTIVE from interrupt mask.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+index 5469a159e902..4566fae91d02 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+@@ -773,7 +773,7 @@ brcmf_sdio_kso_control(struct brcmf_sdio *bus, bool on)
+ 	return err;
+ }
+ 
+-#define HOSTINTMASK		(I_HMB_SW_MASK | I_CHIPACTIVE)
++#define HOSTINTMASK		(I_HMB_SW_MASK /*| I_CHIPACTIVE*/)
+ 
+ /* Turn backplane clock on or off */
+ static int brcmf_sdio_htclk(struct brcmf_sdio *bus, bool on, bool pendok)
+-- 
+2.25.0
+

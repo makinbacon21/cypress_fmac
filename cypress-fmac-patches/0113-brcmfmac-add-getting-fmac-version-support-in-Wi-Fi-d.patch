@@ -1,0 +1,82 @@
+From 6411d4b2535bc91325ee4ab3f4fd1451d474a74f Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Thu, 9 Jan 2020 03:07:19 -0600
+Subject: [PATCH 113/130] brcmfmac: add getting fmac version support in Wi-Fi
+ debugging feature
+
+Current FMAC is backported modules in Android, so we use
+CPTCFG_KERNEL_VERSION as FMAC version.
+
+Verified: checked Driver Version in bugreport
+
+Chipset information :-----------------------------------------------
+FW Version is: wl0: Sep 12 2018 01:30:32 version 7.45.171 (r707829 CY)
+FWID 01-1918156a
+
+Driver Version is: v4.14.77-kong-rc7-9-ge9d8ba4
+Supported Feature set: -1
+--------------------------------------------------------------------
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../broadcom/brcm80211/brcmfmac/vendor.c      | 29 ++++++++++++-------
+ 1 file changed, 19 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+index 9ed60279556a..074caad23a77 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+@@ -21,6 +21,10 @@
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
++#if defined(CONFIG_BRCMFMAC_ANDROID)
++#define UNKNOWN_VER_STR		"Unknown version"
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
++
+ static int brcmf_cfg80211_vndr_cmds_dcmd_handler(struct wiphy *wiphy,
+ 						 struct wireless_dev *wdev,
+ 						 const void *data, int len)
+@@ -403,7 +407,7 @@ brcmf_cfg80211_andr_dbg_get_version(struct wiphy *wiphy,
+ 	struct sk_buff *reply;
+ 	int ret = 0, rem, type;
+ 	char buf[512];
+-	bool fmac_ver;
++	bool fmac_ver = false;
+ 	const struct nlattr *iter;
+ 
+ 	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
+@@ -431,16 +435,21 @@ brcmf_cfg80211_andr_dbg_get_version(struct wiphy *wiphy,
+ 		}
+ 	}
+ 
+-	/* TODO: In case of DEBUG_ATTRIBUTE_GET_DRIVER,
+-	 *       need to return right fmac driver version.
+-	 */
+ 	memset(buf, 0, sizeof(buf));
+-	ret = brcmf_fil_iovar_data_get(ifp, "ver", buf, sizeof(buf));
+-
+-	if (ret) {
+-		brcmf_err("get ver error, ret = %d\n", ret);
+-		ret = -EIO;
+-		goto exit;
++	if (fmac_ver) {
++#if defined(CPTCFG_KERNEL_VERSION)
++		strncpy(buf, CPTCFG_KERNEL_VERSION,
++			sizeof(CPTCFG_KERNEL_VERSION));
++#else
++		strncpy(buf, UNKNOWN_VER_STR, sizeof(UNKNOWN_VER_STR));
++#endif /* defined(CPTCFG_KERNEL_VERSION) */
++	} else {
++		ret = brcmf_fil_iovar_data_get(ifp, "ver", buf, sizeof(buf));
++		if (ret) {
++			brcmf_err("get ver error, ret = %d\n", ret);
++			ret = -EIO;
++			goto exit;
++		}
+ 	}
+ 	brcmf_dbg(INFO, "Version : %s\n", buf);
+ 	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, strlen(buf));
+-- 
+2.25.0
+

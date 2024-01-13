@@ -1,0 +1,108 @@
+From c5b9ddf06aa60d53e5e3787ef69269d8fe0b20ed Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Mon, 27 Jul 2020 03:50:28 -0500
+Subject: [PATCH 124/130] brcmfmac: move Android support from NXP 10.0.0-1.0.0
+ to 10.0.0-2.0.0
+
+To support NXP Android 10.0.0-2.0.0, we modify some APIs to support
+kernel 5.4.y.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+
+---
+ .../broadcom/brcm80211/brcmfmac/android.c     | 20 +++++++++++++++----
+ .../broadcom/brcm80211/brcmfmac/cfg80211.c    |  5 ++---
+ .../broadcom/brcm80211/brcmfmac/common.c      |  2 +-
+ 3 files changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+index 91f235eb82a5..364a0957aa3e 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+@@ -1727,6 +1727,16 @@ brcmf_handle_private_cmd(struct brcmf_pub *drvr, struct net_device *ndev,
+ 	return bytes_written;
+ }
+ 
++static inline void brcmf_wake_lock_init(struct wakeup_source *ws,
++					const char *name)
++{
++	if (ws) {
++		memset(ws, 0, sizeof(*ws));
++		ws->name = name;
++	}
++	wakeup_source_add(ws);
++}
++
+ int brcmf_android_attach(struct device *dev, struct brcmf_mp_device *settings)
+ {
+ 	int err = 0;
+@@ -1755,8 +1765,8 @@ int brcmf_android_attach(struct device *dev, struct brcmf_mp_device *settings)
+ 	android->country[0] = 0;
+ 	android->country[1] = 0;
+ 	android->country[2] = 0;
+-	wakeup_source_init(&android->wakelock, "brcm_wlan_wake");
+-	wakeup_source_init(&android->rx_wakelock, "brcm_wlan_rxwake");
++	brcmf_wake_lock_init(&android->wakelock, "brcm_wlan_wake");
++	brcmf_wake_lock_init(&android->rx_wakelock, "brcm_wlan_rxwake");
+ 	spin_lock_init(&android->wakelock_spinlock);
+ 	drvr->android = android;
+ 
+@@ -1775,8 +1785,10 @@ int brcmf_android_detach(struct brcmf_pub *drvr)
+ 
+ 	brcmf_dbg(TRACE, "enter\n");
+ 
+-	wakeup_source_trash(&android->wakelock);
+-	wakeup_source_trash(&android->rx_wakelock);
++	wakeup_source_remove(&android->wakelock);
++	__pm_relax(&android->wakelock);
++	wakeup_source_remove(&android->rx_wakelock);
++	__pm_relax(&android->rx_wakelock);
+ 	kfree(drvr->android);
+ 	drvr->android = NULL;
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index 3ab5f12359ef..400c81ad4476 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -9,7 +9,6 @@
+ #include <linux/etherdevice.h>
+ #include <linux/module.h>
+ #include <linux/vmalloc.h>
+-#include <linux/wakelock.h>
+ #include <net/cfg80211.h>
+ #include <net/netlink.h>
+ 
+@@ -2970,7 +2969,7 @@ static s32 brcmf_inform_single_bss(struct brcmf_cfg80211_info *cfg,
+ 	size_t notify_ielen;
+ 	struct cfg80211_inform_bss bss_data = {};
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-	struct timespec ts;
++	struct timespec64 ts;
+ 	u64 tsf;
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+@@ -3002,7 +3001,7 @@ static s32 brcmf_inform_single_bss(struct brcmf_cfg80211_info *cfg,
+ 	notify_ielen = le32_to_cpu(bi->ie_length);
+ 	bss_data.signal = (s16)le16_to_cpu(bi->RSSI) * 100;
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-	get_monotonic_boottime(&ts);
++	ktime_get_boottime_ts64(&ts);
+ 	tsf = le64_to_cpu(((u64)ts.tv_sec * 1000000) + ts.tv_nsec / 1000);
+ 
+ 	brcmf_dbg(CONN, "tsf: %lld\n", tsf);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+index 8f0131705e56..a08616c3e04c 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+@@ -542,7 +542,7 @@ void brcmf_release_module_param(struct brcmf_mp_device *module_param)
+ 	kfree(module_param);
+ }
+ 
+-static int __init brcmf_common_pd_probe(struct platform_device *pdev)
++static int brcmf_common_pd_probe(struct platform_device *pdev)
+ {
+ 	brcmf_dbg(INFO, "Enter\n");
+ 
+-- 
+2.25.0
+

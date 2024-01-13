@@ -1,0 +1,34 @@
+From 78765977b0bdc1deb71a8c7244cc8a261a24f543 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Tue, 2 Jun 2020 23:03:22 -0500
+Subject: [PATCH 2/4] wifi: disable two debugging flags because not support
+ currently
+
+FMAC does not support DEBUG_HOST_WAKE_REASON_STATS and
+DEBUG_RING_BUFFER_VENDOR_DATA currently, so we disable these two
+debugging flags in wifihal.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ wifi/1.3/default/hidl_struct_util.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/wifi/1.3/default/hidl_struct_util.cpp b/wifi/1.3/default/hidl_struct_util.cpp
+index d305c0997..0b61c8916 100644
+--- a/wifi/1.3/default/hidl_struct_util.cpp
++++ b/wifi/1.3/default/hidl_struct_util.cpp
+@@ -157,8 +157,9 @@ bool convertLegacyFeaturesToHidlChipCapabilities(
+ 
+     // There are no flags for these 3 in the legacy feature set. Adding them to
+     // the set because all the current devices support it.
+-    *hidl_caps |= HidlChipCaps::DEBUG_RING_BUFFER_VENDOR_DATA;
+-    *hidl_caps |= HidlChipCaps::DEBUG_HOST_WAKE_REASON_STATS;
++    /* Cypress FMAC does not support those two features, will have them soon */
++    //*hidl_caps |= HidlChipCaps::DEBUG_RING_BUFFER_VENDOR_DATA;
++    //*hidl_caps |= HidlChipCaps::DEBUG_HOST_WAKE_REASON_STATS;
+     *hidl_caps |= HidlChipCaps::DEBUG_ERROR_ALERTS;
+     return true;
+ }
+-- 
+2.25.0
+

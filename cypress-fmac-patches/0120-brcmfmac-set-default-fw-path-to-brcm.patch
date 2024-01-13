@@ -1,0 +1,33 @@
+From 60e88fa9517e68301be11a866915d7fce4ef9207 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Fri, 29 May 2020 02:05:49 -0500
+Subject: [PATCH 120/130] brcmfmac: set default fw path to brcm/
+
+To support STA/AP concurrent mode, we use the same firmware for AP and STA
+mode. Therefore, we rollback the fw path change to set default fw path as
+brcm/.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h
+index f7ae18f70b16..3347439543bb 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h
+@@ -9,11 +9,7 @@
+ 
+ #define	BRCMF_FW_NAME_LEN		320
+ 
+-#if defined(CONFIG_BRCMFMAC_ANDROID)
+-#define BRCMF_FW_DEFAULT_PATH		""
+-#else
+ #define BRCMF_FW_DEFAULT_PATH		"brcm/"
+-#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ /**
+  * struct brcmf_firmware_mapping - Used to map chipid/revmask to firmware
+-- 
+2.25.0
+

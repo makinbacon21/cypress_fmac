@@ -1,0 +1,42 @@
+From d5c778b813fbe63a29519ebc7a2f31a67bb52835 Mon Sep 17 00:00:00 2001
+From: Jia-Shyr Chuang <joseph.chuang@cypress.com>
+Date: Mon, 9 Mar 2020 22:10:12 -0500
+Subject: [PATCH 098/130] brcmfmac: distinguish max pkt size
+
+Rx low throughput issue was caused by acquiring skb size
+exceeded data pkt from ring. but wl curpower needs to
+acuire more than 2084 pkt size.
+To fix this issue needs to distinguish max packet size
+between rx data post and rx ctrl post.
+
+Signed-off-by: Jia-Shyr Chuang <joseph.chuang@cypress.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
+index b988467d5a87..9f1e8adde8e3 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/msgbuf.c
+@@ -53,7 +53,8 @@
+ 
+ #define BRCMF_IOCTL_REQ_PKTID			0xFFFE
+ 
+-#define BRCMF_MSGBUF_MAX_PKT_SIZE		8192
++#define BRCMF_MSGBUF_MAX_PKT_SIZE		2048
++#define BRCMF_MSGBUF_MAX_CTL_PKT_SIZE           8192
+ #define BRCMF_MSGBUF_RXBUFPOST_THRESHOLD	32
+ #define BRCMF_MSGBUF_MAX_IOCTLRESPBUF_POST	8
+ #define BRCMF_MSGBUF_MAX_EVENTBUF_POST		8
+@@ -1033,7 +1034,7 @@ brcmf_msgbuf_rxbuf_ctrl_post(struct brcmf_msgbuf *msgbuf, bool event_buf,
+ 		rx_bufpost = (struct msgbuf_rx_ioctl_resp_or_event *)ret_ptr;
+ 		memset(rx_bufpost, 0, sizeof(*rx_bufpost));
+ 
+-		skb = brcmu_pkt_buf_get_skb(BRCMF_MSGBUF_MAX_PKT_SIZE);
++		skb = brcmu_pkt_buf_get_skb(BRCMF_MSGBUF_MAX_CTL_PKT_SIZE);
+ 
+ 		if (skb == NULL) {
+ 			bphy_err(drvr, "Failed to alloc SKB\n");
+-- 
+2.25.0
+

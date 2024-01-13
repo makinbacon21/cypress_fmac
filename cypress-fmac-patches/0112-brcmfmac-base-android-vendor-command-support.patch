@@ -1,0 +1,3685 @@
+From 54c5d1da11f89c5eca76792dc35b002cd3d56177 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Wed, 8 Jan 2020 02:23:12 -0600
+Subject: [PATCH 112/130] brcmfmac: base android vendor command support
+
+1. Add Android SUBCMD definitions/functions/attributes
+2. Fix GCC's warning messages
+3. Add missing ANDROID build flag
+
+Verified: STA, Hotspot, P2P functions on iMX6SX Android 9.0
+
+
+Signed-off-by: Ethan Kim(Youngic) <youngsic.kim@cypress.com>
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ .../broadcom/brcm80211/brcmfmac/android.c     | 1469 ++++++++++++++++-
+ .../broadcom/brcm80211/brcmfmac/android.h     |    6 +
+ .../broadcom/brcm80211/brcmfmac/bcmsdh.c      |    4 +-
+ .../broadcom/brcm80211/brcmfmac/bus.h         |    2 +
+ .../broadcom/brcm80211/brcmfmac/cfg80211.c    |  247 ++-
+ .../broadcom/brcm80211/brcmfmac/cfg80211.h    |   61 +
+ .../broadcom/brcm80211/brcmfmac/common.c      |   27 +-
+ .../broadcom/brcm80211/brcmfmac/common.h      |    2 +
+ .../broadcom/brcm80211/brcmfmac/core.c        |  201 +--
+ .../broadcom/brcm80211/brcmfmac/feature.c     |   24 +-
+ .../broadcom/brcm80211/brcmfmac/firmware.c    |    2 +-
+ .../broadcom/brcm80211/brcmfmac/firmware.h    |    4 +-
+ .../broadcom/brcm80211/brcmfmac/fwil.c        |    8 +-
+ .../broadcom/brcm80211/brcmfmac/fwil.h        |    8 +
+ .../broadcom/brcm80211/brcmfmac/fwil_types.h  |    3 +-
+ .../broadcom/brcm80211/brcmfmac/pcie.c        |    5 +-
+ .../broadcom/brcm80211/brcmfmac/pno.c         |    1 +
+ .../broadcom/brcm80211/brcmfmac/proto.h       |    2 +
+ .../broadcom/brcm80211/brcmfmac/sdio.c        |    9 +-
+ .../broadcom/brcm80211/brcmfmac/vendor.c      |  487 ++++--
+ .../broadcom/brcm80211/brcmfmac/vendor.h      |  237 +++
+ .../broadcom/brcm80211/brcmutil/utils.c       |   27 +
+ .../broadcom/brcm80211/include/brcmu_wifi.h   |   24 +-
+ 23 files changed, 2579 insertions(+), 281 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+index 8cd9f5492a03..506cb3004fd6 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.c
+@@ -39,6 +39,8 @@
+ #include "sdio.h"
+ #include "fwil.h"
+ #include "vendor.h"
++#include "brcmu_utils.h"
++#include "brcmu_wifi.h"
+ 
+ #define CMD_START		"START"
+ #define CMD_STOP		"STOP"
+@@ -63,6 +65,22 @@
+ #define CMD_COUNTRY		"COUNTRY"
+ #define CMD_P2P_SET_NOA		"P2P_SET_NOA"
+ #define CMD_MIRACAST		"MIRACAST"
++#define CMD_INTERFACE_CREATE	"INTERFACE_CREATE"
++#define CMD_INTERFACE_DELETE	"INTERFACE_DELETE"
++#define CMD_DATARATE		"DATARATE"
++#define CMD_ADDIE		"ADD_IE"
++#define CMD_DELIE		"DEL_IE"
++#define CMD_SET_WPS_P2PIE	"SET_AP_WPS_P2P_IE"
++#define CMD_ASSOC_CLIENTS	"ASSOCLIST"
++#define CMD_GET_MODE		"MODE"
++#define CMD_SET_AMPDU_MPDU	"AMPDU_MPDU"
++#define CMD_GET_CHANSPEC	"CHANSPEC"
++#define CMD_HAPD_MAC_FILTER	"HAPD_MAC_FILTER"
++#define CMD_SET_HAPD_AUTO_CHANNEL	"HAPD_AUTO_CHANNEL"
++#define CMD_HIDDEN_SSID		"HIDE_SSID"
++#define CMD_SET_CSA		"SETCSA"
++#define CMD_COUNTRYREV_GET	"GETCOUNTRYREV"
++#define CMD_COUNTRYREV_SET	"SETCOUNTRYREV"
+ 
+ #define DEFAULT_WIFI_TURNON_DELAY	200
+ 
+@@ -73,6 +91,108 @@
+ 
+ #define MIRACAST_AMPDU_SIZE		8
+ 
++#define DOT11_MNG_PROPR_ID	221
++#define VNDR_IE_HDR_LEN		2	/* id + len field */
++#define VNDR_IE_MIN_LEN		3	/* size of the oui field */
++#define VNDR_IE_MAX_LEN		256	/* verdor IE max length */
++
++#define MAX_NUM_OF_ASSOCLIST	64
++#define ETHER_ADDR_LEN		6	/* length of an Ethernet address */
++
++/* For ioctls that take a list of MAC addresses */
++struct maclist {
++	uint count;		/**< number of MAC addresses */
++	struct ether_addr ea[1]; /**< variable length array of MAC addresses */
++};
++
++/* Bandwidth */
++#define WL_CH_BANDWIDTH_20MHZ 20
++#define WL_CH_BANDWIDTH_40MHZ 40
++#define WL_CH_BANDWIDTH_80MHZ 80
++#define WL_CH_BANDWIDTH_160MHZ 160
++
++#define CSA_BROADCAST_ACTION_FRAME	0	/* csa broadcast action frame */
++#define CSA_UNICAST_ACTION_FRAME	1	/* csa unicast action frame */
++
++/* Channel Switch Announcement param */
++struct brcmf_chan_switch {
++	u8 mode;	/* value 0 or 1 */
++	u8 count;	/* count # of beacons before switching */
++	u16 chspec;	/* chanspec */
++	u8 reg;		/* regulatory class */
++	u8 frame_type;	/* csa frame type, unicast or broadcast */
++};
++
++u16 chan_to_chanspec(struct brcmu_d11inf *d11inf,
++		     u16 channel)
++{
++	struct brcmu_chan ch_inf;
++
++	ch_inf.chnum = channel;
++	ch_inf.bw = BRCMU_CHAN_BW_20;
++	d11inf->encchspec(&ch_inf);
++
++	return ch_inf.chspec;
++}
++
++#define WLC_IOCTL_SMLEN		256	/* "small" len ioctl buffer required */
++#define WLC_CNTRY_BUF_SZ	4	/* Country string is 3 bytes + NUL */
++
++struct brcmf_country {
++	char country_abbrev[WLC_CNTRY_BUF_SZ];	/* nul-terminated country
++						 * code used in the Country
++						 * IE
++						 */
++	int rev;			/* revision specifier for ccode on
++					 * set, -1 indicates unspecified on
++					 * get, rev >= 0
++					 */
++	char ccode[WLC_CNTRY_BUF_SZ];	/* nul-terminated built-in country
++					 * code. variable length, but fixed
++					 * size in struct allows simple
++					 * allocation for expected country
++					 * strings <= 3 chars.
++					 */
++};
++
++/* hostap mac mode */
++#define MACLIST_MODE_DISABLED	0
++#define MACLIST_MODE_DENY	1
++#define MACLIST_MODE_ALLOW	2
++
++/* max number of mac filter list
++ * restrict max number to 10 as maximum cmd string size is 255
++ */
++#define MAX_NUM_MAC_FILT	10
++
++/* miracast related definition */
++#define MIRACAST_MODE_OFF	0
++#define MIRACAST_MODE_SOURCE	1
++#define MIRACAST_MODE_SINK	2
++
++#ifndef MIRACAST_MCHAN_ALGO
++#define MIRACAST_MCHAN_ALGO     1
++#endif
++
++#ifndef MIRACAST_MCHAN_BW
++#define MIRACAST_MCHAN_BW	25
++#endif
++
++#ifndef MIRACAST_AMPDU_SIZE
++#define MIRACAST_AMPDU_SIZE	8
++#endif
++
++#define PM_OFF	0
++
++static u8 miracast_cur_mode;
++
++/* Used to get specific STA parameters */
++struct scb_val {
++	uint val;
++	struct ether_addr ea;
++};
++
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ int brcmf_android_wifi_on(struct brcmf_pub *drvr, struct net_device *ndev)
+ {
+ 	int ret = 0;
+@@ -125,6 +245,7 @@ brcmf_android_wifi_off(struct brcmf_pub *drvr, struct net_device *ndev)
+ 
+ 	return ret;
+ }
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ static int brcmf_android_set_suspendmode(struct net_device *ndev,
+ 					 char *command, int total_len)
+@@ -151,16 +272,20 @@ static int brcmf_android_set_suspendmode(struct net_device *ndev,
+ static int brcmf_android_set_country(struct net_device *ndev, char *command,
+ 				     int total_len)
+ {
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 	struct brcmf_if *ifp =  netdev_priv(ndev);
+ 	struct brcmf_pub *drvr = ifp->drvr;
+ 	struct brcmf_android *android = drvr->android;
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 	char *country_code = command + strlen(CMD_COUNTRY) + 1;
+ 	int ret = 0;
+ 
+ 	ret = brcmf_set_country(ndev, country_code);
+ 
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 	if (!ret)
+ 		strncpy(android->country, country_code, 2);
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ 	return ret;
+ }
+@@ -226,44 +351,1226 @@ int brcmf_android_pktfilter_remove(struct net_device *ndev, char *command,
+ }
+ 
+ static
+-int brcmf_android_set_miracast(struct net_device *ndev, char *command,
+-			       int total_len)
++int brcmf_privcmd_get_band(struct net_device *ndev, char *command,
++			   int total_len)
+ {
+ 	struct brcmf_if *ifp =  netdev_priv(ndev);
+-	int miracast_mode = *(command + strlen(CMD_MIRACAST) + 1) - '0';
+-	static int miracast_off_ampdu_size;
+-	int ret = 0;
++	uint band;
++	int ret;
++	int err = 0;
++
++	err = brcmf_fil_cmd_int_get(ifp, BRCMF_C_GET_BAND, &band);
++	if (err)
++		return err;
++
++	ret = snprintf(command, total_len, "Band:%d", band);
++
++	return ret;
++}
++
++static
++void brcmf_privcmd_set_passive_scan(struct brcmf_if *ifp,
++				    char *command, int total_len)
++{
++	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_cfg80211_info *cfg = NULL;
+ 
+-	brcmf_dbg(INFO, "set miracast mode %d\n", miracast_mode);
+-
+-	//TODO: Do we need to set mchan_algo & mchan_bw?
+-	if (miracast_mode == MIRACAST_MODE_OFF) {
+-		ret = brcmf_fil_iovar_int_set(ifp, "ampdu_mpdu",
+-					      miracast_off_ampdu_size);
+-	} else if (miracast_mode == MIRACAST_MODE_SOURCE ||
+-			miracast_mode == MIRACAST_MODE_SINK) {
+-		ret = brcmf_fil_iovar_int_get(ifp, "ampdu_mpdu",
+-					      &miracast_off_ampdu_size);
+-		if (!ret)
+-			ret = brcmf_fil_iovar_int_set(ifp, "ampdu_mpdu",
+-						      MIRACAST_AMPDU_SIZE);
++	if (drvr) {
++		cfg = drvr->config;
+ 	} else {
+-		ret = -EINVAL;
++		brcmf_err("drvr is null\n");
++		return;
++	}
++
++	// TODO: support passive scan
++	brcmf_err("cmd:%s is not supported\n", command);
++}
++
++static
++int brcmf_get_rssi(struct brcmf_if *ifp,
++		   struct brcmf_scb_val_le *scb_val)
++{
++	int err;
++
++	err = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_RSSI,
++				     scb_val, sizeof(struct brcmf_scb_val_le));
++	if (err)
++		brcmf_err("Could not get rssi (%d)\n", err);
++	return err;
++}
++
++static
++int brcmf_privcmd_get_rssi(struct brcmf_if *ifp, char *command, int total_len)
++{
++	int bytes_written = 0;
++	int error = 0;
++	struct brcmf_scb_val_le scbval;
++	char *tmp = NULL;
++
++	tmp = strchr(command, ' ');
++	/* For Ap mode rssi command would be
++	 * driver rssi <sta_mac_addr>
++	 * for STA/GC mode
++	 */
++	if (tmp) {
++		/* Ap/GO mode
++		 * driver rssi <sta_mac_addr>
++		 */
++		int i;
++
++		brcmf_dbg(TRACE, "cmd:%s\n", tmp);
++		/* skip space from delim after finding char */
++		tmp++;
++		if (!(brcmu_ether_atoe((tmp), scbval.ea)))
++			return -1;
++		scbval.val = 0;
++		for (i = 0; i < 6; i++)
++			brcmf_err("%02x\n", scbval.ea[i]);
++	} else {
++		/* STA/GC mode */
++		memset(&scbval, 0, sizeof(struct brcmf_scb_val_le));
++	}
++	error = brcmf_get_rssi(ifp, &scbval);
++	if (error)
++		return -1;
++
++	bytes_written += snprintf(command, total_len, "rssi:%d", scbval.val);
++	command[bytes_written] = '\0';
++	return bytes_written;
++}
++
++static
++int brcmf_privcmd_get_link_speed(struct brcmf_if *ifp,
++				 char *command, int total_len)
++{
++	int err;
++	int plink_speed = 0;
++	int bytes_written = 0;
++
++	err = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_RATE,
++				     &plink_speed, sizeof(int));
++	if (err) {
++		brcmf_err("Could not get link speed (%d)\n", err);
++		return err;
++	}
++
++	/* Convert internal 500Kbps to android mbps */
++	plink_speed = plink_speed / 2;
++	bytes_written = snprintf(command, total_len, "link_speed %d",
++				 plink_speed);
++
++	return bytes_written;
++}
++
++static
++int brcmf_privcmd_get_data_rate(struct brcmf_if *ifp,
++				char *command, int total_len)
++{
++	int err;
++	int data_rate = 0;
++	int bytes_written = 0;
++
++	err = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_RATE,
++				     &data_rate, sizeof(int));
++	if (err) {
++		brcmf_err("Could not get data rate (%d)\n", err);
++		return err;
++	}
++
++	bytes_written = snprintf(command, total_len, "datarate:%d",
++				 (data_rate / 2));
++
++	return bytes_written;
++}
++
++static
++int brcmf_privcmd_add_ie(struct brcmf_if *ifp,
++			 char *command, int total_len)
++{
++	struct brcmf_cfg80211_vif *vif = ifp->vif;
++	int datalen = 0, idx = 0, tot_len = 0;
++	u8 ie_buf[VNDR_IE_MAX_LEN];
++	char *pcmd = NULL;
++	char hex[] = "XXX";
++	u16 pktflag;
++	s32 err = 0;
++	struct tlv_t *vndr_ie = NULL;
++
++	pcmd = kzalloc((total_len + 1), GFP_KERNEL);
++	if (!pcmd)
++		return -ENOMEM;
++
++	pcmd = command + strlen(CMD_ADDIE) + 1;
++
++	pktflag = simple_strtoul(pcmd, &pcmd, 10);
++
++	pcmd = pcmd + 1;
++
++	for (idx = 0; idx < DOT11_OUI_LEN; idx++) {
++		hex[0] = *pcmd++;
++		hex[1] = *pcmd++;
++		hex[2] = '\0';
++		brcmf_err("hex:%s\n", hex);
++		err = kstrtou8(&hex[0], 16, &ie_buf[idx]);
++		if (err) {
++			brcmf_err("kstrou8 failed %d\n", err);
++			kfree(pcmd);
++			return err;
++		}
++	}
++	pcmd++;
++	brcmf_err("pcmd:%s\n", pcmd);
++	while ((*pcmd != '\0') && (idx < VNDR_IE_MAX_LEN)) {
++		hex[0] = *pcmd++;
++		hex[1] = *pcmd++;
++		hex[2] = '\0';
++		brcmf_err("hex:%s\n", hex);
++		err = kstrtou8(&hex[0], 16, &ie_buf[idx]);
++		brcmf_err("ie_buf:%02X\n", ie_buf[idx]);
++		idx++;
++		datalen++;
++	}
++	tot_len = sizeof(struct tlv_t) + (datalen - 1);
++	vndr_ie = kzalloc(tot_len, GFP_KERNEL);
++	if (!vndr_ie) {
++		brcmf_err(("IE memory alloc failed\n"));
++		kfree(pcmd);
++		return -ENOMEM;
++	}
++	vndr_ie->id = DOT11_MNG_PROPR_ID;
++
++	vndr_ie->len = datalen;
++	memcpy(vndr_ie->oui, &ie_buf[0], DOT11_OUI_LEN);
++	vndr_ie->oui_type = 4;
++	memcpy(vndr_ie->data, &ie_buf[DOT11_OUI_LEN], datalen);
++
++	err = brcmf_vif_set_mgmt_ie(vif, pktflag, (const u8 *)vndr_ie, tot_len);
++	if (err) {
++		brcmf_err("set ie failed with err:%d\n", err);
++		err = -EINVAL;
++	}
++
++	kfree(vndr_ie);
++	kfree(pcmd);
++	return err;
++}
++
++static
++int brcmf_privcmd_del_ie(struct brcmf_if *ifp, char *command,
++			 int total_len)
++{
++	struct brcmf_cfg80211_vif *vif = ifp->vif;
++	u16 pktflag;
++	char *pcmd = NULL;
++	s32 err = 0;
++	char hex[] = "XXX";
++
++	pcmd = command + strlen(CMD_DELIE) + 1;
++	hex[0] = *pcmd;
++	hex[1] = '\0';
++
++	err = kstrtou16(&hex[0], 10, &pktflag);
++	if (err) {
++		brcmf_err("kstrou16 failed %d\n", err);
++		kfree(pcmd);
++		return err;
++	}
++	err = brcmf_vif_set_mgmt_ie(vif, pktflag, NULL, 0);
++	if (err) {
++		brcmf_err("delete ie failed:%d\n", err);
++		err = -EINVAL;
++	}
++	memset(&vif->saved_ie, 0, sizeof(vif->saved_ie));
++	return err;
++}
++
++int
++brcmf_privcmd_get_assoclist(struct brcmf_if *ifp, char *command,
++			    int total_len)
++{
++	int  error = 0;
++	int bytes_written = 0;
++	uint i;
++	char mac_buf[MAX_NUM_OF_ASSOCLIST *
++		sizeof(struct ether_addr) + sizeof(uint)] = {0};
++
++	struct maclist *assoc_maclist = (struct maclist *)mac_buf;
++
++	brcmf_info("%s: ENTER\n", __func__);
++
++	assoc_maclist->count = MAX_NUM_OF_ASSOCLIST;
++
++	error = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_ASSOCLIST,
++				       assoc_maclist, sizeof(mac_buf));
++	if (error)
++		return -1;
++
++	assoc_maclist->count = assoc_maclist->count;
++	bytes_written = snprintf(command, total_len, "%slistcount:%d Stations:",
++				 CMD_ASSOC_CLIENTS,
++				 assoc_maclist->count);
++
++	for (i = 0; i < assoc_maclist->count; i++) {
++		bytes_written += snprintf(command + bytes_written, total_len,
++					  " " "%02X:%02X:%02X:%02X:%02X:%02X",
++					  assoc_maclist->ea[i].octet[0],
++					  assoc_maclist->ea[i].octet[1],
++					  assoc_maclist->ea[i].octet[2],
++					  assoc_maclist->ea[i].octet[3],
++					  assoc_maclist->ea[i].octet[4],
++					  assoc_maclist->ea[i].octet[5]);
++	}
++	return bytes_written;
++}
++
++int
++brcmf_privcmd_get_chanspec(struct brcmf_if *ifp, char *command,
++			   int total_len)
++{
++	int err = 0;
++	unsigned int chanspec;
++	int band = 0;
++	int bw = 0;
++	u8 channel;
++	u8 sb = 0;
++	int bytes_written = 0;
++
++	err = brcmf_fil_iovar_int_get(ifp, "chanspec", &chanspec);
++	if (err) {
++		brcmf_err("chanspec failed (%d)\n", err);
++		return err;
++	}
++	brcmf_dbg(TRACE, "chanspec (%x)\n", chanspec);
++	channel = CHSPEC_CHANNEL(chanspec);
++	band = CHSPEC_BAND(chanspec);
++	bw = CHSPEC_BW(chanspec);
++
++	switch (bw) {
++	case WL_CHANSPEC_BW_80:
++			bw = WL_CH_BANDWIDTH_80MHZ;
++			break;
++	case WL_CHANSPEC_BW_40:
++			bw = WL_CH_BANDWIDTH_40MHZ;
++			break;
++	case WL_CHANSPEC_BW_20:
++			bw = WL_CH_BANDWIDTH_20MHZ;
++			break;
++	default:
++		bw = WL_CH_BANDWIDTH_20MHZ;
++		break;
++	}
++
++	if (bw == WL_CH_BANDWIDTH_40MHZ) {
++		if (CHSPEC_SB_UPPER(chanspec))
++			channel += CH_10MHZ_APART;
++		else
++			channel -= CH_10MHZ_APART;
++	} else if (bw == WL_CH_BANDWIDTH_80MHZ) {
++		sb = chanspec & WL_CHANSPEC_CTL_SB_MASK;
++		if (sb == WL_CHANSPEC_CTL_SB_LL)
++			channel -= (CH_10MHZ_APART + CH_20MHZ_APART);
++		else if (sb == WL_CHANSPEC_CTL_SB_LU)
++			channel -= CH_10MHZ_APART;
++		else if (sb == WL_CHANSPEC_CTL_SB_UL)
++			channel += CH_10MHZ_APART;
++		else
++			/* WL_CHANSPEC_CTL_SB_UU */
++			channel += (CH_10MHZ_APART + CH_20MHZ_APART);
++	}
++	brcmf_info("band:%x bw:%d\n", band, bw);
++	bytes_written = snprintf(command, total_len,
++				 "%s:channel=%d band=%s bw=%d",
++				 CMD_GET_CHANSPEC, channel, band ==
++				 WL_CHANSPEC_BAND_5G ? "5G" : "2G", bw);
++
++	return bytes_written;
++}
++
++int
++brcmf_privcmd_80211_get_mode(struct brcmf_if *ifp,
++			     char *command, int total_len)
++{
++	int err = 0;
++	int band = 0;
++	char cap[5];
++	int bw = 0;
++	int channel = 0;
++	unsigned int chanspec;
++	u8 *buf = NULL;
++	int bytes_written = 0;
++	//	struct wl_bss_info *bss = NULL;
++	struct brcmf_bss_info_le *bss = NULL;
++
++	buf = kzalloc(WL_BSS_INFO_MAX, GFP_KERNEL);
++	if (!buf) {
++		err = -ENOMEM;
++		return err;
++	}
++	*(__le32 *)buf = cpu_to_le32(WL_BSS_INFO_MAX);
++
++	err = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_BSS_INFO,
++				     buf, WL_BSS_INFO_MAX);
++	if (err) {
++		brcmf_err("WLC_GET_BSS_INFO failed: %d\n", err);
++		kfree(buf);
++		buf = NULL;
++		return err;
++	}
++
++	bss = (struct brcmf_bss_info_le  *)(buf + 4);
++	chanspec = le16_to_cpu(bss->chanspec);
++	brcmf_err("chanspec (%x)\n", chanspec);
++	channel = CHSPEC_CHANNEL(chanspec);
++	band = CHSPEC_BAND(chanspec);
++	bw = CHSPEC_BW(chanspec);
++	brcmf_dbg(INFO, "band:%x bw:%d\n", band, bw);
++
++	if (band == WL_CHANSPEC_BAND_2G) {
++		if (bss->n_cap)
++			strcpy(cap, "n");
++		else
++			strcpy(cap, "bg");
++	} else if (band == WL_CHANSPEC_BAND_5G) {
++		if (bw == WL_CHANSPEC_BW_80) {
++			strcpy(cap, "ac");
++		} else if (bw == WL_CHANSPEC_BW_40 ||
++			   bw == WL_CHANSPEC_BW_20) {
++			if ((bss->nbss_cap & 0xf00) && bss->n_cap)
++				strcpy(cap, "n|ac");
++			else if (bss->vht_cap)
++				strcpy(cap, "ac");
++			else if (bss->n_cap)
++				strcpy(cap, "n");
++			else
++				strcpy(cap, "a");
++		} else {
++			brcmf_err("%s:Mode get failed\n", __func__);
++			kfree(buf);
++			buf = NULL;
++			return -EINVAL;
++		}
++	}
++	bytes_written = snprintf(command, total_len, "%s %s",
++				 CMD_GET_MODE, cap);
++	kfree(buf);
++	buf = NULL;
++	return bytes_written;
++}
++
++int
++brcmf_privcmd_ampdu_mpdu(struct brcmf_if *ifp, char *command, int total_len)
++{
++	int err = 0;
++	int ampdu_mpdu;
++	int skip = strlen(CMD_SET_AMPDU_MPDU) + 1;
++
++	err = kstrtoint((command + skip), 10, &ampdu_mpdu);
++	if (err) {
++		brcmf_err("strtoint failed with err:%d\n", err);
++		return err;
++	}
++
++	if (ampdu_mpdu > 32) {
++		brcmf_err("ampdu_mpdu MAX value is 32.\n");
++		return -1;
++	}
++	err = brcmf_fil_iovar_data_set(ifp, "ampdu_mpdu", &ampdu_mpdu,
++				       sizeof(int));
++	if (err < 0) {
++		brcmf_err("ampdu_mpdu set error. %d\n", err);
++		return -1;
++	}
++
++	return 0;
++}
++
++static int brcmf_privcmd_set_csa(struct brcmf_if *ifp, char *cmd, int total_len)
++{
++	struct brcmf_chan_switch csa_arg;
++	struct brcmf_cfg80211_info *cfg = ifp->drvr->config;
++	int err = 0;
++	char str[5];
++	u16 chnsp;
++	u8 channel = 0;
++
++	brcmf_err("%s:cmd:%d\n", cmd, __LINE__);
++
++	cmd = (cmd + strlen(CMD_SET_CSA));
++
++	/* Order is mode, count, channel
++	 * DRIVER SETCSA 0 10 1 u
++	 */
++	if (!*++cmd) {
++		brcmf_err("%d:error missing arguments\n", __LINE__);
++		return -1;
++	}
++
++	memset(&str, 0, 5);
++
++	str[0] = *cmd++;
++	str[1] = '\0';
++
++	err = kstrtou8(str, 10, &csa_arg.mode);
++
++	if (err) {
++		brcmf_err("%d:kstrtou8 failed %d\n", __LINE__, err);
++		return err;
++	}
++
++	if (csa_arg.mode != 0 && csa_arg.mode != 1) {
++		brcmf_err("%d:Invalid mode\n", __LINE__);
++		return -1;
++	}
++
++	if (!*++cmd) {
++		brcmf_err("%d:error missing count\n", __LINE__);
++		return -1;
++	}
++
++	str[0] = *cmd++;
++	if (*cmd != ' ') {
++		str[1] = *cmd++;
++		str[2] = '\0';
++	} else {
++		str[1] = '\0';
++	}
++
++	err = kstrtou8(str, 10, &csa_arg.count);
++	if (err) {
++		brcmf_err("%d:kstrtoul failed %d\n", __LINE__, err);
++		return err;
++	}
++
++	csa_arg.reg = 0;
++	csa_arg.chspec = 0;
++
++	if (!*++cmd) {
++		brcmf_err("%d:error missing channel\n", __LINE__);
++		return -1;
++	}
++
++	str[0] = *cmd++;
++	if (*cmd != ' ') {
++		str[1] = *cmd++;
++		str[2] = '\0';
++	} else {
++		str[1] = '\0';
++	}
++
++	err = kstrtou8(str, 10, &channel);
++	if (err) {
++		brcmf_err("%d:kstrtou16 failed %d\n", __LINE__, err);
++		return err;
++	}
++
++	chnsp = chan_to_chanspec(&cfg->d11inf, channel);
++
++	if (chnsp == 0) {
++		brcmf_err("%d:chsp is not correct\n", __LINE__);
++		return -1;
++	}
++	csa_arg.chspec = chnsp;
++
++	/* csa action frame type */
++	if (*++cmd) {
++		if (strcmp(cmd, "u") == 0) {
++			csa_arg.frame_type = CSA_UNICAST_ACTION_FRAME;
++		} else {
++			brcmf_err("%d:error: invalid frame type: %s\n",
++				  __LINE__, cmd);
++			return -1;
++		}
++	} else {
++		csa_arg.frame_type = CSA_BROADCAST_ACTION_FRAME;
++	}
++
++	if (csa_arg.chspec & WL_CHANSPEC_BAND_5G) {
++		int chanspec = csa_arg.chspec;
++
++		err = brcmf_fil_iovar_data_get(ifp, "per_chan_info", &chanspec,
++					       sizeof(int));
++		if (!err) {
++			if ((chanspec & WL_CHAN_RADAR) ||
++			    (chanspec & WL_CHAN_PASSIVE)) {
++				brcmf_err("%d:Channel is radar sensitive\n",
++					  __LINE__);
++				return -1;
++			}
++			if (chanspec == 0) {
++				brcmf_err("%d:Invalid hw channel\n", __LINE__);
++				return -1;
++			}
++		} else {
++			brcmf_err("%d:does not support per_chan_info\n",
++				  __LINE__);
++			return -1;
++		}
++		brcmf_info("%d:non radar sensitivity\n", __LINE__);
++	}
++
++	err = brcmf_fil_iovar_data_set(ifp, "csa", &csa_arg, sizeof(csa_arg));
++	if (err < 0) {
++		brcmf_err("%d:set csa failed:%d\n", __LINE__, err);
++		return -1;
++	}
++	return 0;
++}
++
++static int
++brcmf_privcmd_set_band(struct brcmf_if *ifp, u32 band)
++{
++	int err = 0;
++	struct brcmf_cfg80211_info *cfg = ifp->drvr->config;
++
++	if (!cfg) {
++		brcmf_err("setband failed with:%d\n", band);
++		return -1;
++	}
++
++	if (band == WLC_BAND_AUTO ||
++	    band == WLC_BAND_5G ||
++	    band == WLC_BAND_2G)
++		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_BAND, band);
++	if (!err)
++		err = brcmf_setup_wiphybands(cfg);
++	else
++		brcmf_err("setband failed with:%d\n", band);
++
++	return err;
++}
++
++static int
++brcmf_privcmd_hidden_ssid(struct brcmf_if *ifp, char *cmd, int tot_len)
++{
++	int bytes_written = 0;
++	int hidden_ssid = 0;
++	int err = 0;
++	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_cfg80211_info *cfg = NULL;
++
++	if (drvr && drvr->config) {
++		cfg =  drvr->config;
++	} else {
++		brcmf_err("drvr is null\n");
++		return -1;
++	}
++	if (*(cmd + strlen(CMD_HIDDEN_SSID)) == '\0') {
++		bytes_written += snprintf(cmd, tot_len, "hidden:%d",
++					  cfg->hidden_ssid);
++		cmd[bytes_written] = '\0';
++		return bytes_written;
++	}
++	err = kstrtoint((cmd + strlen(CMD_HIDDEN_SSID) + 1), 10, &hidden_ssid);
++	if (err) {
++		brcmf_err("strtoint failed with err:%d\n", err);
++		return err;
++	}
++	cfg->hidden_ssid = hidden_ssid;
++
++	err = brcmf_fil_iovar_int_set(ifp, "closednet", hidden_ssid);
++	if (err)
++		brcmf_err("failed with:%d\n", err);
++
++	return err;
++}
++
++static int brcmf_privcmd_get_country_rev(struct brcmf_if *ifp, char *cmd,
++					 int total_len)
++{
++	struct brcmf_country cspec;
++	int bytes_written;
++	int err = 0;
++	char smbuf[WLC_IOCTL_SMLEN];
++
++	/* Usage
++	 * DRIVER GETCOUNTRYREV
++	 */
++	brcmf_dbg(TRACE, "Line:%d cmd:%s\n", __LINE__, cmd);
++
++	err = brcmf_fil_iovar_data_get(ifp, "country", smbuf, sizeof(smbuf));
++
++	if (!err) {
++		memcpy(&cspec, smbuf, sizeof(cspec));
++		brcmf_info("Line:%d get country '%c%c %d'\n",
++			   __LINE__, cspec.ccode[0],
++			   cspec.ccode[1], cspec.rev);
++	} else {
++		brcmf_err("Line:%d get country rev failed with err:%d\n",
++			  __LINE__, err);
++		return -1;
++	}
++
++	bytes_written = snprintf(cmd, total_len, "%s %c%c %d",
++				 CMD_COUNTRYREV_GET, cspec.ccode[0],
++				 cspec.ccode[1], cspec.rev);
++
++	return bytes_written;
++}
++
++static int
++brcmf_privcmd_set_country_rev(struct brcmf_if *ifp, char *cmd, int total_len)
++{
++	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_cfg80211_info *cfg = drvr->config;
++	struct brcmf_country cspec = {{0}, 0, {0} };
++	char country_code[WLC_CNTRY_BUF_SZ];
++	int rev = 0;
++	int err = 0;
++
++	/* Usage
++	 * DRIVER SETCOUNTRYREV US
++	 */
++	memset(country_code, 0, sizeof(country_code));
++	err = sscanf(cmd + sizeof("SETCOUNTRYREV"),
++		     "%10s %10d", country_code, &rev);
++	if (!err) {
++		brcmf_err("Line:%d: Failed to get Parameter\n", __LINE__);
++		return -1;
++	}
++
++	brcmf_dbg(TRACE, "Line:%d country_code = %s, rev = %d\n",
++		  __LINE__, country_code, rev);
++
++	memcpy(cspec.country_abbrev, country_code, sizeof(country_code));
++	memcpy(cspec.ccode, country_code, sizeof(country_code));
++	cspec.rev = rev;
++
++	err = brcmf_fil_iovar_data_set(ifp, "country", &cspec, sizeof(cspec));
++
++	if (err) {
++		brcmf_err("Line:%d set country '%s/%d' failed error code %d\n",
++			  __LINE__, cspec.ccode, cspec.rev, err);
++	} else {
++		brcmf_setup_wiphybands(cfg);
++		brcmf_dbg(TRACE, "Line:%d set country '%s/%d'\n",
++			  __LINE__, cspec.ccode, cspec.rev);
+ 	}
+ 
++	return err;
++}
++
++int
++brcmf_privcmd_set_ap_mac_list(struct brcmf_if *ifp, int macmode,
++			      struct maclist *maclist)
++{
++	int i, j, match;
++	int ret = 0;
++	int err = 0;
++	char mac_buf[MAX_NUM_OF_ASSOCLIST *
++		sizeof(struct ether_addr) + sizeof(uint)] = {0};
++	struct maclist *assoc_maclist = (struct maclist *)mac_buf;
++
++	/* set filtering mode */
++	err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_MACMODE, macmode);
++	if (err) {
++		brcmf_err("set macmode err %d\n", err);
++		return err;
++	}
++
++	if (macmode != MACLIST_MODE_DISABLED) {
++		/* set the MAC filter list */
++		err = brcmf_fil_cmd_data_set(ifp, BRCMF_C_SET_MACLIST, maclist,
++					     sizeof(int) +
++					     sizeof(struct ether_addr) *
++					     maclist->count);
++
++		if (err) {
++			brcmf_err("set maclist err %d\n", err);
++			return err;
++		}
++
++		/* get the current list of associated STAs */
++		assoc_maclist->count = MAX_NUM_OF_ASSOCLIST;
++		err = brcmf_fil_cmd_data_get(ifp, BRCMF_C_GET_ASSOCLIST,
++					     assoc_maclist, sizeof(mac_buf));
++
++		if (err) {
++			brcmf_err("get assoclist err %d\n", err);
++			return err;
++		}
++
++		/* do we have any STA associated? */
++		if (assoc_maclist->count) {
++			/* iterate each associated STA */
++			for (i = 0; i < assoc_maclist->count; i++) {
++				match = 0;
++				/* compare with each entry */
++				for (j = 0; j < maclist->count; j++) {
++					if (memcmp(assoc_maclist->ea[i].octet,
++						   maclist->ea[j].octet,
++						   ETHER_ADDR_LEN) == 0) {
++						match = 1;
++						break;
++					}
++				}
++				/* do conditional deauth */
++				/* "if not in the allow list" */
++				/* or "if in the deny list" */
++				if ((macmode == MACLIST_MODE_ALLOW && !match) ||
++				    (macmode == MACLIST_MODE_DENY && match)) {
++					struct scb_val scbval;
++
++					scbval.val = 1;
++					memcpy(&scbval.ea,
++					       &assoc_maclist->ea[i],
++					       ETHER_ADDR_LEN);
++					err = brcmf_fil_cmd_data_set(ifp, BRCMF_C_SCB_DEAUTHENTICATE_FOR_REASON,
++								     &scbval, sizeof(struct scb_val));
++					if (err)
++						return -1;
++				}
++			}
++		}
++	}
+ 	return ret;
+ }
+ 
++/* HAPD_MAC_FILTER mac_mode mac_cnt mac_addr1 mac_addr2 ..
++ */
++static int
++brcmf_privcmd_set_mac_address_filter(struct brcmf_if *ifp, char *cmd,
++				     int total_len)
++{
++	int i;
++	int macnum = 0;
++	int macmode = MACLIST_MODE_DISABLED;
++	int err = 0;
++	struct maclist *list;
++	char *token;
++	char str[3];
++
++	/* Usage
++	 * string should look like below (macmode/macnum/maclist)
++	 * 1 2 00:11:22:33:44:55 00:11:22:33:44:ff
++	 * DRIVER HAPD_MAC_FILTER 1 2 00:11:22:33:44:55 00:11:22:33:44:ff
++	 */
++
++	brcmf_dbg(TRACE, "Line:%d cmd:%s\n", __LINE__, cmd);
++
++	cmd = (cmd + strlen(CMD_HAPD_MAC_FILTER));
++	if (!*++cmd) {
++		brcmf_err("Line:%d:error missing arguments\n", __LINE__);
++		return -1;
++	}
++
++	memset(&str, 0, 3);
++
++	/* get the MAC filter mode */
++	str[0] = *cmd++;
++	str[1] = '\0';
++	err = kstrtoint(str, 10, &macmode);
++	if (err) {
++		brcmf_err("Line:%d kstrtoint failed with error:%d\n",
++			  __LINE__, err);
++		return err;
++	}
++
++	if (macmode < MACLIST_MODE_DISABLED || macmode > MACLIST_MODE_ALLOW) {
++		brcmf_err("Line:%d invalid macmode %d\n", __LINE__, macmode);
++		return -1;
++	}
++
++	cmd++;
++
++	/* get the macnum */
++	str[0] = *cmd++;
++	if (*cmd != ' ') {
++		str[1] = *cmd++;
++		str[2] = '\0';
++	} else {
++		str[1] = '\0';
++	}
++
++	err = kstrtoint(str, 10, &macnum);
++	if (err) {
++		brcmf_err("Line:%d kstrtoint failed with error:%d\n",
++			  __LINE__, err);
++		return err;
++	}
++
++	if (macnum <= 0 || macnum > MAX_NUM_MAC_FILT) {
++		brcmf_err("Line:%d : invalid number of MAC address entries:%d\n",
++			  __LINE__, macnum);
++		return -1;
++	}
++
++	/* allocate memory for the MAC list */
++	list = kmalloc(sizeof(int) +
++		sizeof(struct ether_addr) * macnum, GFP_KERNEL);
++	if (!list)
++		return -1;
++
++	/* prepare the MAC list */
++	list->count = macnum;
++
++	for (i = 0; i < list->count; i++) {
++		token = strsep((char **)&cmd, " ");
++		if (!(brcmu_ether_atoe(cmd, list->ea[i].octet))) {
++			kfree(list);
++			return -1;
++		}
++		brcmf_dbg(TRACE, "Line:%d: %d/%d MACADDR=%s",
++			  __LINE__, i, list->count, cmd);
++	}
++
++	/* set the list */
++	err = brcmf_privcmd_set_ap_mac_list(ifp, macmode, list);
++	if (err) {
++		brcmf_err("Line:%d Setting MAC list failed error:%d\n",
++			  __LINE__, err);
++	}
++
++	kfree(list);
++
++	return 0;
++}
++
++/* SoftAP feature */
++#define APCS_BAND_2G_LEGACY1	20
++#define APCS_BAND_2G_LEGACY2	0
++#define APCS_BAND_AUTO			"band=auto"
++#define APCS_BAND_2G			"band=2g"
++#define APCS_BAND_5G			"band=5g"
++#define APCS_MAX_RETRY			10
++#define APCS_DEFAULT_2G_CH		1
++#define APCS_DEFAULT_5G_CH		149
++
++static int
++brcmf_privcmd_set_auto_channel(struct brcmf_if *ifp, const char *cmd_str,
++			       char *command, int total_len)
++{
++	int channel = 0;
++	int chosen = 0;
++	int retry = 0;
++	int ret = 0;
++	uint spect = 0;
++	u8 *reqbuf = NULL;
++	const char *ch_str = NULL;
++	u32 band = WLC_BAND_2G;
++	u32 buf_size;
++	int err = 0;
++
++	if (cmd_str) {
++		if (strncasecmp(cmd_str, APCS_BAND_AUTO,
++				strlen(APCS_BAND_AUTO)) == 0) {
++			band = WLC_BAND_AUTO;
++		} else if (strncasecmp(cmd_str, APCS_BAND_5G,
++				       strlen(APCS_BAND_5G)) == 0) {
++			band = WLC_BAND_5G;
++		} else if (strncasecmp(cmd_str, APCS_BAND_2G,
++				       strlen(APCS_BAND_2G)) == 0) {
++			band = WLC_BAND_2G;
++		} else {
++			/** For backward compatibility: Some platforms
++			 *	used to issue argument 20 or 0
++			 *  to enforce the 2G channel selection
++			 */
++			ch_str = cmd_str +
++					 strlen(CMD_SET_HAPD_AUTO_CHANNEL) + 1;
++			err = kstrtoint(ch_str, 10, &channel);
++			if (err) {
++				brcmf_err("strtoint failed with err:%d\n", err);
++				return err;
++			}
++
++			if (channel == APCS_BAND_2G_LEGACY1 ||
++			    channel == APCS_BAND_2G_LEGACY2) {
++				band = WLC_BAND_2G;
++			} else {
++				brcmf_err("Invalid argument\n");
++				return -EINVAL;
++			}
++		}
++	} else {
++		/* If no argument is provided, default to 2G */
++		brcmf_err("No argument given default to 2.4G scan\n");
++		band = WLC_BAND_2G;
++	}
++
++	err = brcmf_fil_cmd_int_get(ifp, BRCMF_C_GET_SPECT_MANAGEMENT, &spect);
++	if (err) {
++		brcmf_err("ACS: error getting the spect\n");
++		goto done;
++	}
++
++	if (spect > 0) {
++		/* If STA is connected, return is STA channel,
++		 * else ACS can be issued,
++		 * set spect to 0 and proceed with ACS
++		 */
++		channel = brcmf_cfg80211_get_sta_channel(ifp);
++		if (channel) {
++			channel = (channel <= CH_MAX_2G_CHANNEL) ?
++						channel :
++						APCS_DEFAULT_2G_CH;
++			goto done2;
++		}
++
++		ret = brcmf_cfg80211_set_spect(ifp, 0);
++		if (ret < 0) {
++			brcmf_err("ACS: error while setting spect\n");
++			goto done;
++		}
++	}
++
++	reqbuf = kzalloc(BRCMF_DCMD_MEDLEN, GFP_KERNEL);
++	if (!reqbuf)
++		return -ENOMEM;
++
++	if (band == WLC_BAND_AUTO) {
++		reqbuf[0] = 0;
++	} else if (band == WLC_BAND_5G) {
++		ret = brcmf_cfg80211_get_chanspecs_5g(ifp, reqbuf,
++						      BRCMF_DCMD_MEDLEN);
++		if (ret < 0) {
++			brcmf_err("ACS 5g chanspec retreival failed!\n");
++			goto done;
++		}
++	} else if (band == WLC_BAND_2G) {
++		/**
++		 * If channel argument is not provided/ argument 20 is provided,
++		 * Restrict channel to 2GHz, 20MHz BW, No SB
++		 */
++		ret = brcmf_cfg80211_get_chanspecs_2g(ifp, reqbuf,
++						      BRCMF_DCMD_MEDLEN);
++		if (ret < 0) {
++			brcmf_err("ACS 2g chanspec retreival failed!\n");
++			goto done;
++		}
++	} else {
++		brcmf_err("ACS: No band chosen\n");
++		goto done2;
++	}
++
++	/* Start auto channel selection scan. */
++	buf_size = (band == WLC_BAND_AUTO) ? sizeof(int) : CHANSPEC_BUF_SIZE;
++	err = brcmf_fil_cmd_data_set(ifp, BRCMF_C_START_CHANNEL_SEL,
++				     reqbuf, buf_size);
++	if (ret < 0) {
++		brcmf_err("can't start auto channel scan, err = %d\n", err);
++		channel = 0;
++		goto done;
++	}
++
++	/* Wait for auto channel selection, max 3000 ms */
++	if (band == WLC_BAND_2G || band == WLC_BAND_5G) {
++		msleep(500);
++	} else {
++		/**
++		 * Full channel scan at the minimum takes 1.2secs
++		 * even with parallel scan. max wait time: 3500ms
++		 */
++		msleep(1000);
++	}
++
++	retry = APCS_MAX_RETRY;
++	while (retry--) {
++		err = brcmf_fil_cmd_int_get(ifp, BRCMF_C_GET_CHANNEL_SEL,
++					    &chosen);
++		if (err) {
++			brcmf_err("get auto channel err %d\n", err);
++			chosen = 0;
++		}
++
++		if (chosen) {
++			int chosen_band;
++			int apcs_band;
++
++			channel = CHSPEC_CHANNEL(chosen);
++
++			apcs_band = (band == WLC_BAND_AUTO) ?
++				WLC_BAND_2G :
++				band;
++
++			chosen_band = (channel <= CH_MAX_2G_CHANNEL) ?
++				WLC_BAND_2G :
++				WLC_BAND_5G;
++
++			if (apcs_band == chosen_band) {
++				brcmf_err("selected channel = %d\n", channel);
++				break;
++			}
++		}
++		brcmf_info("%d tried, ret = %d, chosen = 0x%x\n",
++			   (APCS_MAX_RETRY - retry), ret, chosen);
++		msleep(250);
++	}
++
++done:
++	if (retry == 0 || ret < 0) {
++		/* On failure, fallback to a default channel */
++		if (band == WLC_BAND_5G)
++			channel = APCS_DEFAULT_5G_CH;
++		else
++			channel = APCS_DEFAULT_2G_CH;
++
++		brcmf_err("ACS failed. Fall back to default channel (%d)\n",
++			  channel);
++	}
++done2:
++	if (spect > 0) {
++		ret = brcmf_cfg80211_set_spect(ifp, spect);
++		if (ret < 0)
++			brcmf_err("ACS: error while setting spect\n");
++	}
++
++	kfree(reqbuf);
++
++	if (channel) {
++		snprintf(command, 4, "%d", channel);
++		brcmf_info("command result is %s\n", command);
++		return strlen(command);
++	} else {
++		return ret;
++	}
++}
++
++/* force update cfg80211 to keep power save mode in sync.
++ */
++void brcmf_cfg80211_update_power_mode(struct brcmf_if *ifp,
++				      struct net_device *dev)
++{
++	int err, pm = -1;
++
++	err = brcmf_fil_cmd_int_get(ifp, BRCMF_C_GET_PM, &pm);
++	if (err)
++		brcmf_err("Line:%d error (%d)\n", __LINE__, err);
++	else if (pm != -1 && dev->ieee80211_ptr)
++		dev->ieee80211_ptr->ps = (pm == PM_OFF) ? false : true;
++}
++
++static int
++brcmf_privcmd_set_miracast(struct brcmf_if *ifp, char *cmd,
++			   int total_len)
++{
++	int mode, val;
++	int err = 0;
++	char str[3];
++
++	/* Usage
++	 * DRIVER MIRACAST <mode>
++	 */
++	brcmf_dbg(TRACE, "set miracast cmd %s\n", cmd);
++
++	cmd = (cmd + strlen(CMD_MIRACAST));
++
++	memset(&str, 0, 3);
++
++	if (!*++cmd) {
++		brcmf_err("missing arguments\n");
++		return -1;
++	}
++
++	/* get the miracast mode */
++	str[0] = *cmd++;
++	str[1] = '\0';
++	err = kstrtoint(str, 10, &mode);
++	if (err) {
++		brcmf_err("kstrtoint failed err %d\n", err);
++		return err;
++	}
++
++	brcmf_dbg(INFO, "enter miracast mode:%d\n", mode);
++
++	if (miracast_cur_mode == mode)
++		return 0;
++
++	/* TODO: currently android and suspend resume support is not present
++	 * in FMAC. This shall be taken up once required support is present
++	 */
++	/* brmcf_privcmd_android_iolist_resume(dev, &miracast_resume_list); */
++
++	miracast_cur_mode = MIRACAST_MODE_OFF;
++
++	switch (mode) {
++	case MIRACAST_MODE_SOURCE:
++		/* setting mchan_algo to platform specific value */
++
++		/* XXX check for station's beacon interval(BI)
++		 * If BI is over 100ms, don't use mchan_algo
++		 */
++
++		err = brcmf_fil_cmd_int_get(ifp, BRCMF_C_GET_BCNPRD, &val);
++
++		if (!err && val > 100) {
++			brcmf_err("get beacon period %d err %d\n", val, err);
++			return err;
++		}
++
++		err = brcmf_fil_iovar_int_set(ifp, "mchan_algo",
++					      MIRACAST_MCHAN_ALGO);
++		if (err) {
++			brcmf_err("set mchan_algo err %d\n", err);
++			return err;
++		}
++
++		/* setting mchan_bw to platform specific value */
++		err = brcmf_fil_iovar_int_set(ifp, "mchan_bw",
++					      MIRACAST_MCHAN_BW);
++
++		if (err) {
++			brcmf_err("set mchan_bw err %d\n", err);
++			return err;
++		}
++
++		err = brcmf_fil_iovar_int_set(ifp, "ampdu_mpdu",
++					      MIRACAST_AMPDU_SIZE);
++		if (err) {
++			brcmf_err("set ampdu_mpdu err %d\n", err);
++			return err;
++		}
++		/* FALLTROUGH */
++		/* Source mode shares most configurations with sink mode.
++		 * Fall through here to avoid code duplication
++		 */
++	case MIRACAST_MODE_SINK:
++		/* disable internal roaming */
++		err = brcmf_fil_iovar_int_set(ifp, "roam_off",
++					      1);
++		if (err) {
++			brcmf_err("set roam off err %d\n", err);
++			return err;
++		}
++
++		/* turn off pm */
++		err = brcmf_fil_cmd_int_get(ifp, BRCMF_C_GET_PM, &val);
++		if (err) {
++			brcmf_err("get PM mode err %d\n", err);
++			return err;
++		}
++
++		if (val != PM_OFF) {
++			val = PM_OFF;
++			err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_PM, val);
++			if (err) {
++				brcmf_err("set PM mode err %d\n", err);
++				return err;
++			}
++			brcmf_cfg80211_update_power_mode(ifp, ifp->ndev);
++		}
++		break;
++	case MIRACAST_MODE_OFF:
++	default:
++		break;
++	}
++	miracast_cur_mode = mode;
++	return 0;
++}
++
+ int
+ brcmf_handle_private_cmd(struct brcmf_pub *drvr, struct net_device *ndev,
+ 			 char *command, u32 cmd_len)
+ {
+ 	int bytes_written = 0;
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 	struct brcmf_android *android = drvr->android;
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 	struct brcmf_android_wifi_priv_cmd priv_cmd;
++	struct brcmf_if *ifp = netdev_priv(ndev);
+ 
+-	brcmf_dbg(TRACE, "enter\n");
++	brcmf_dbg(TRACE, "enter  command: %s  cmd_len:%d\n", command, cmd_len);
+ 
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 	if (!android) {
+ 		brcmf_err("not supported\n");
+ 		return -EOPNOTSUPP;
+@@ -273,53 +1580,145 @@ brcmf_handle_private_cmd(struct brcmf_pub *drvr, struct net_device *ndev,
+ 		brcmf_err("ignore cmd \"%s\" - iface is down\n", command);
+ 		return 0;
+ 	}
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ 	memset(&priv_cmd, 0, sizeof(struct brcmf_android_wifi_priv_cmd));
+ 	priv_cmd.total_len = cmd_len;
+ 
+-	if (strncmp(command, CMD_SETSUSPENDMODE,
+-		    strlen(CMD_SETSUSPENDMODE)) == 0) {
++	if (strncasecmp(command, CMD_SETSUSPENDMODE,
++			strlen(CMD_SETSUSPENDMODE)) == 0) {
+ 		bytes_written =
+ 		    brcmf_android_set_suspendmode(ndev, command,
+ 						  priv_cmd.total_len);
+-	} else if (strncmp(command, CMD_COUNTRY, strlen(CMD_COUNTRY)) == 0) {
++	} else if (strncasecmp(command, CMD_COUNTRY,
++			       strlen(CMD_COUNTRY)) == 0) {
+ 		bytes_written =
+ 		    brcmf_android_set_country(ndev, command,
+ 					      priv_cmd.total_len);
+-	} else if (strncmp(command, CMD_BTCOEXMODE,
++	} else if (strncasecmp(command, CMD_BTCOEXMODE,
+ 		   strlen(CMD_BTCOEXMODE)) == 0) {
+ 		bytes_written =
+ 		    brcmf_android_set_btcoexmode(ndev, command,
+ 						 priv_cmd.total_len);
+-	} else if (strncmp(command, CMD_RXFILTER_START,
++	} else if (strncasecmp(command, CMD_RXFILTER_START,
+ 		   strlen(CMD_RXFILTER_START)) == 0) {
+ 		bytes_written =
+ 		    brcmf_pktfilter_enable(ndev, true);
+-	} else if (strncmp(command, CMD_RXFILTER_STOP,
++	} else if (strncasecmp(command, CMD_RXFILTER_STOP,
+ 		   strlen(CMD_RXFILTER_STOP)) == 0) {
+ 		bytes_written =
+ 		    brcmf_pktfilter_enable(ndev, false);
+-	} else if (strncmp(command, CMD_RXFILTER_ADD,
++	} else if (strncasecmp(command, CMD_RXFILTER_ADD,
+ 		   strlen(CMD_RXFILTER_ADD)) == 0) {
+ 		bytes_written =
+ 		    brcmf_android_pktfilter_add(ndev, command,
+ 						priv_cmd.total_len);
+-	} else if (strncmp(command, CMD_RXFILTER_REMOVE,
++	} else if (strncasecmp(command, CMD_RXFILTER_REMOVE,
+ 		   strlen(CMD_RXFILTER_REMOVE)) == 0) {
+ 		bytes_written =
+ 		    brcmf_android_pktfilter_remove(ndev, command,
+ 						   priv_cmd.total_len);
+-	} else if (strncmp(command, CMD_MIRACAST,
+-		   strlen(CMD_MIRACAST)) == 0) {
+-		bytes_written =
+-		    brcmf_android_set_miracast(ndev, command,
+-					       priv_cmd.total_len);
+-	} else if (strncmp(command, CMD_BTCOEXSCAN_START,
++	} else if (strncasecmp(command, CMD_BTCOEXSCAN_START,
+ 		   strlen(CMD_BTCOEXSCAN_START)) == 0) {
+ 		//TODO: Handle BTCOEXSCAN_START command
+-	} else if (strncmp(command, CMD_BTCOEXSCAN_STOP,
++	} else if (strncasecmp(command, CMD_BTCOEXSCAN_STOP,
+ 		   strlen(CMD_BTCOEXSCAN_STOP)) == 0) {
+ 		//TODO: Handle BTCOEXSCAN_STOP command
++	} else if (strncasecmp(command, CMD_GETBAND,
++		   strlen(CMD_GETBAND)) == 0) {
++		bytes_written =
++		    brcmf_privcmd_get_band(ndev, command, priv_cmd.total_len);
++	} else if (strncasecmp(command, CMD_SCAN_ACTIVE,
++			   strlen(CMD_SCAN_ACTIVE)) == 0) {
++		brcmf_privcmd_set_passive_scan(ifp, command,
++					       priv_cmd.total_len);
++	} else if (strncasecmp(command, CMD_SCAN_PASSIVE,
++			   strlen(CMD_SCAN_PASSIVE)) == 0) {
++		brcmf_privcmd_set_passive_scan(ifp, command,
++					       priv_cmd.total_len);
++	} else if (strncasecmp(command, CMD_RSSI,
++			   strlen(CMD_RSSI)) == 0) {
++		bytes_written = brcmf_privcmd_get_rssi(ifp, command,
++						       priv_cmd.total_len);
++	} else if (strncasecmp(command, CMD_LINKSPEED,
++			   strlen(CMD_LINKSPEED)) == 0) {
++		bytes_written =
++			brcmf_privcmd_get_link_speed(ifp, command,
++						     priv_cmd.total_len);
++	} else if (strncasecmp(command, CMD_DATARATE,
++			   strlen(CMD_DATARATE)) == 0) {
++		bytes_written = brcmf_privcmd_get_data_rate(ifp, command,
++							    priv_cmd.total_len);
++	} else if (strncasecmp(command, CMD_ADDIE,
++			   strlen(CMD_ADDIE)) == 0) {
++		bytes_written = brcmf_privcmd_add_ie(ifp, command, cmd_len);
++	} else if (strncasecmp(command, CMD_DELIE,
++		   strlen(CMD_DELIE)) == 0) {
++		bytes_written = brcmf_privcmd_del_ie(ifp, command, cmd_len);
++	} else if (strncasecmp(command, CMD_SET_WPS_P2PIE,
++		   strlen(CMD_SET_WPS_P2PIE)) == 0) {
++		int skip = strlen(CMD_SET_WPS_P2PIE) + 3;
++
++		bytes_written =
++			brcmf_cfg80211_set_ap_wps_p2p_ie(ifp->vif,
++							 command + skip,
++							 (priv_cmd.total_len -
++							 skip),
++							 *(command + skip - 2)
++							 - '0');
++	} else if (strncasecmp(command, CMD_ASSOC_CLIENTS,
++			   strlen(CMD_ASSOC_CLIENTS)) == 0) {
++		bytes_written = brcmf_privcmd_get_assoclist(ifp, command,
++							    cmd_len);
++	} else if (strncasecmp(command, CMD_GET_CHANSPEC,
++			   strlen(CMD_GET_CHANSPEC)) == 0) {
++		bytes_written = brcmf_privcmd_get_chanspec(ifp, command,
++							   cmd_len);
++	} else if (strncasecmp(command, CMD_GET_MODE,
++			   strlen(CMD_GET_MODE)) == 0) {
++		bytes_written = brcmf_privcmd_80211_get_mode(ifp, command,
++							     cmd_len);
++	} else if (strncasecmp(command, CMD_SET_AMPDU_MPDU,
++			   strlen(CMD_SET_AMPDU_MPDU)) == 0) {
++		bytes_written = brcmf_privcmd_ampdu_mpdu(ifp, command,
++							 cmd_len);
++	} else if (strncasecmp(command, CMD_SETBAND,
++			       strlen(CMD_SETBAND)) == 0) {
++		u32 band;
++
++		band = *(command + strlen(CMD_SETBAND) + 1) - '0';
++		bytes_written = brcmf_privcmd_set_band(ifp, band);
++	} else if (strncasecmp(command, CMD_HIDDEN_SSID,
++			   strlen(CMD_HIDDEN_SSID)) == 0) {
++		bytes_written = brcmf_privcmd_hidden_ssid(ifp, command,
++							  cmd_len);
++	} else if (strncasecmp(command, CMD_SET_CSA,
++			   strlen(CMD_SET_CSA)) == 0) {
++		bytes_written = brcmf_privcmd_set_csa(ifp, command, cmd_len);
++	} else if (strncasecmp(command, CMD_COUNTRYREV_GET,
++			   strlen(CMD_COUNTRYREV_GET)) == 0) {
++		bytes_written =
++			brcmf_privcmd_get_country_rev(ifp, command, cmd_len);
++	} else if (strncasecmp(command, CMD_COUNTRYREV_SET,
++			   strlen(CMD_COUNTRYREV_SET)) == 0) {
++		bytes_written =
++			brcmf_privcmd_set_country_rev(ifp, command, cmd_len);
++	} else if (strncasecmp(command, CMD_HAPD_MAC_FILTER,
++			 strlen(CMD_HAPD_MAC_FILTER)) == 0) {
++		bytes_written =
++			brcmf_privcmd_set_mac_address_filter(ifp, command,
++							     cmd_len);
++	} else if (strncasecmp(command, CMD_MIRACAST,
++			   strlen(CMD_MIRACAST)) == 0) {
++		bytes_written =
++			brcmf_privcmd_set_miracast(ifp, command, cmd_len);
++	} else if (strncasecmp(command, CMD_SET_HAPD_AUTO_CHANNEL,
++			   strlen(CMD_SET_HAPD_AUTO_CHANNEL)) == 0) {
++		int skip = strlen(CMD_SET_HAPD_AUTO_CHANNEL) + 1;
++
++		bytes_written = brcmf_privcmd_set_auto_channel(ifp,
++							       (const char *)command + skip,
++							       command, cmd_len);
+ 	} else {
+ 		brcmf_err("unknown PRIVATE command %s - ignored\n", command);
+ 		snprintf(command, 5, "FAIL");
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+index e135e84180e6..a01d195a0af9 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+@@ -57,6 +57,9 @@ struct brcmf_android_wifi_priv_cmd {
+ 	int total_len;
+ };
+ 
++#define DOT11_OUI_LEN		3	/* d11 OUI length */
++
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ struct brcmf_android {
+ 	struct brcmf_pub *drvr;
+ 	struct wiphy *wiphy;
+@@ -73,3 +76,6 @@ struct brcmf_android {
+ 	unsigned int wakelock_waive_counter;
+ 	u16 pkt_filter_list;
+ };
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
++
++int brcmu_ether_atoe(const char *p,  char *ea);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
+index dc5adef9f003..d2eabf8c732d 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bcmsdh.c
+@@ -22,8 +22,6 @@
+ #include <linux/errno.h>
+ #include <linux/module.h>
+ #include <linux/acpi.h>
+-#include <linux/regulator/consumer.h>
+-#include <linux/wakelock.h>
+ #include <net/cfg80211.h>
+ 
+ #include <defs.h>
+@@ -40,6 +38,8 @@
+ #include "common.h"
+ #include "cfg80211.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
++#include <linux/regulator/consumer.h>
++#include <linux/wakelock.h>
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bus.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bus.h
+index a870fef79701..c173401660b2 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bus.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/bus.h
+@@ -279,7 +279,9 @@ int brcmf_fwlog_attach(struct device *dev);
+ #ifdef CONFIG_BRCMFMAC_SDIO
+ void brcmf_sdio_exit(void);
+ void brcmf_sdio_register(void);
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ int brcmf_bus_devreset(struct brcmf_sdio_dev *sdiodev, int flag);
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ #endif
+ #ifdef CONFIG_BRCMFMAC_USB
+ void brcmf_usb_exit(void);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index bb79de17f697..f93da000f7c5 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -2806,6 +2806,68 @@ brcmf_cfg80211_get_station(struct wiphy *wiphy, struct net_device *ndev,
+ 	return err;
+ }
+ 
++int
++brcmf_cfg80211_get_sta_channel(struct brcmf_if *ifp)
++{
++	int channel = 0;
++	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_cfg80211_info *cfg = NULL;
++
++	if (drvr) {
++		cfg =  drvr->config;
++	} else {
++		brcmf_err("drvr is null\n");
++		return -EINVAL;
++	}
++
++	if (test_bit(BRCMF_VIF_STATUS_CONNECTED, &ifp->vif->sme_state))
++		channel = cfg->channel;
++
++	return channel;
++}
++
++int
++brcmf_cfg80211_set_spect(struct brcmf_if *ifp, int spect)
++{
++	int down = 1;
++	int up = 1;
++	int err = 0;
++	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_cfg80211_info *cfg = NULL;
++
++	if (drvr) {
++		cfg =  drvr->config;
++	} else {
++		brcmf_err("drvr is null\n");
++		return -EINVAL;
++	}
++
++	if (!brcmf_get_drv_status_all(cfg, BRCMF_VIF_STATUS_CONNECTED)) {
++		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_DOWN, down);
++		if (err) {
++			brcmf_err("BRCMF_C_DOWN failed: code: %d\n",
++				  err);
++			return err;
++		}
++
++		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_SPECT_MANAGEMENT,
++					    spect);
++		if (err) {
++			brcmf_err("BRCMF_C_SET_SPECT_MANAGEMENT failed: code: %d\n",
++				  err);
++			return err;
++		}
++
++		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_UP, up);
++		if (err) {
++			brcmf_err("BRCMF_C_DOWN failed: code: %d\n",
++				  err);
++			return err;
++		}
++	}
++	return err;
++}
++
+ static int
+ brcmf_cfg80211_dump_station(struct wiphy *wiphy, struct net_device *ndev,
+ 			    int idx, u8 *mac, struct station_info *sinfo)
+@@ -2897,10 +2959,10 @@ static s32 brcmf_inform_single_bss(struct brcmf_cfg80211_info *cfg,
+ 	u8 *notify_ie;
+ 	size_t notify_ielen;
+ 	struct cfg80211_inform_bss bss_data = {};
+-#if defined(CONFIG_BRCMFMAC_ANDROID)
++#ifdef CONFIG_BRCMFMAC_ANDROID
+ 	struct timespec ts;
+ 	u64 tsf;
+-#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+ 	if (le32_to_cpu(bi->length) > WL_BSS_INFO_MAX) {
+ 		bphy_err(drvr, "Bss info is larger than buffer. Discarding\n");
+@@ -2929,12 +2991,12 @@ static s32 brcmf_inform_single_bss(struct brcmf_cfg80211_info *cfg,
+ 	notify_ie = (u8 *)bi + le16_to_cpu(bi->ie_offset);
+ 	notify_ielen = le32_to_cpu(bi->ie_length);
+ 	bss_data.signal = (s16)le16_to_cpu(bi->RSSI) * 100;
+-#if defined(CONFIG_BRCMFMAC_ANDROID)
++#ifdef CONFIG_BRCMFMAC_ANDROID
+ 	get_monotonic_boottime(&ts);
+ 	tsf = le64_to_cpu(((u64)ts.tv_sec * 1000000) + ts.tv_nsec / 1000);
+ 
+ 	brcmf_dbg(CONN, "tsf: %lld\n", tsf);
+-#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 	brcmf_dbg(CONN, "bssid: %pM\n", bi->BSSID);
+ 	brcmf_dbg(CONN, "Channel: %d(%d)\n", channel, freq);
+ 	brcmf_dbg(CONN, "Capability: %X\n", notify_capability);
+@@ -2947,9 +3009,9 @@ static s32 brcmf_inform_single_bss(struct brcmf_cfg80211_info *cfg,
+ #if defined(CONFIG_BRCMFMAC_ANDROID)
+ 				       tsf,
+ #else
+-					   0,
++				       0,
+ #endif
+-					   notify_capability,
++				       notify_capability,
+ 				       notify_interval, notify_ie,
+ 				       notify_ielen, GFP_KERNEL);
+ 
+@@ -4570,6 +4632,28 @@ s32 brcmf_vif_set_mgmt_ie(struct brcmf_cfg80211_vif *vif, s32 pktflag,
+ 	return err;
+ }
+ 
++s32 brcmf_cfg80211_set_ap_wps_p2p_ie(struct brcmf_cfg80211_vif *vif,
++				     char *buf, int len, enum brcmf_pktype type)
++{
++	s32 ret = 0;
++
++	if (!test_bit(BRCMF_VIF_STATUS_AP_CREATED, &vif->sme_state)) {
++		/* Vendor IEs should be set to FW
++		 * after SoftAP interface is brought up
++		 */
++		brcmf_dbg(TRACE, "Skipping set IE since AP is not up\n");
++		goto exit;
++	} else  {
++		brcmf_dbg(TRACE, "AP is up trying to set mgmt ie\n");
++		if (type) {
++			ret = brcmf_vif_set_mgmt_ie(vif,
++						    type, buf, len);
++		}
++	}
++exit:
++	return ret;
++}
++
+ s32 brcmf_vif_clear_mgmt_ies(struct brcmf_cfg80211_vif *vif)
+ {
+ 	s32 pktflags[] = {
+@@ -6206,7 +6290,7 @@ brcmf_notify_connect_status(struct brcmf_if *ifp,
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 			if (ifp->vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT)
+ 				brcmf_android_reset_country(ifp->drvr);
+-#endif
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 		}
+ 	} else if (brcmf_is_nonetwork(cfg, e)) {
+ 		if (brcmf_is_ibssmode(ifp->vif))
+@@ -7368,8 +7452,10 @@ static int brcmf_setup_wiphy(struct wiphy *wiphy, struct brcmf_if *ifp)
+ 	n_bands = le32_to_cpu(bandlist[0]);
+ 	for (i = 1; i <= n_bands && i < ARRAY_SIZE(bandlist); i++) {
+ 		if (bandlist[i] == cpu_to_le32(WLC_BAND_2G)) {
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 			if (wiphy->bands[NL80211_BAND_2GHZ])
+ 				continue;
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 			band = kmemdup(&__wl_band_2ghz, sizeof(__wl_band_2ghz),
+ 				       GFP_KERNEL);
+ 			if (!band)
+@@ -7387,8 +7473,10 @@ static int brcmf_setup_wiphy(struct wiphy *wiphy, struct brcmf_if *ifp)
+ 			wiphy->bands[NL80211_BAND_2GHZ] = band;
+ 		}
+ 		if (bandlist[i] == cpu_to_le32(WLC_BAND_5G)) {
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 			if (wiphy->bands[NL80211_BAND_5GHZ])
+ 				continue;
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 			band = kmemdup(&__wl_band_5ghz, sizeof(__wl_band_5ghz),
+ 				       GFP_KERNEL);
+ 			if (!band)
+@@ -7596,6 +7684,151 @@ int brcmf_cfg80211_wait_vif_event(struct brcmf_cfg80211_info *cfg,
+ 				  vif_event_equals(event, action), timeout);
+ }
+ 
++s32
++brcmf_cfg80211_get_chanspecs_2g(struct brcmf_if *ifp, void *pbuf, s32 buflen)
++{
++	int err = 0;
++	struct brcmu_chan ch;
++	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_cfg80211_info *cfg = NULL;
++
++	if (drvr) {
++		cfg =  drvr->config;
++	} else {
++		brcmf_err("drvr is null\n");
++		return -EINVAL;
++	}
++
++	if (!pbuf)
++		return -EINVAL;
++
++	memset(pbuf, 0, buflen);
++
++	ch.band  = BRCMU_CHAN_BAND_2G;
++	ch.bw    = BRCMU_CHAN_BW_20;
++	ch.sb    = BRCMU_CHAN_SB_NONE;
++	ch.chnum = 0;
++	ch.control_ch_num = 0;
++
++	cfg->d11inf.encchspec(&ch);
++
++	/* pass encoded chanspec in query */
++	*(__le16 *)pbuf = cpu_to_le16(ch.chspec);
++
++	err = brcmf_fil_iovar_data_get(ifp, "chanspecs", pbuf, buflen);
++	if (err)
++		brcmf_err("chanspec failed (%d)\n", err);
++
++	return err;
++}
++
++static bool
++brcmf_cfg80211_valid_channel_p2p(int channel)
++{
++	bool valid = false;
++
++	/* channel 1 to 14 */
++	if (channel >= 1 && channel <= 14)
++		valid = true;
++	/* channel 36 to 48 */
++	else if (channel >= 36 && channel <= 48)
++		valid = true;
++	/* channel 149 to 161 */
++	else if (channel >= 149 && channel <= 161) {
++		valid = true;
++	} else {
++		valid = false;
++		brcmf_err("invalid P2P chanspec, channel = %d\n", channel);
++	}
++
++	return valid;
++}
++
++s32
++brcmf_cfg80211_get_chanspecs_5g(struct brcmf_if *ifp, void *pbuf, s32 buflen)
++{
++	int err = 0;
++	struct brcmf_chanspec_list *list;
++	struct brcmu_chan ch = {0};
++	struct brcmf_pub *drvr = ifp->drvr;
++	struct brcmf_cfg80211_info *cfg = NULL;
++	u32 total = 0;
++	u32 i, j = 0;
++	u32 chaninfo;
++	bool is_p2p_channel = 0;
++
++	if (drvr) {
++		cfg =  drvr->config;
++	} else {
++		brcmf_err("drvr is null\n");
++		return -EINVAL;
++	}
++
++	if (!pbuf)
++		return -EINVAL;
++
++	list = (struct brcmf_chanspec_list *)pbuf;
++	memset(pbuf, 0, buflen);
++
++	ch.band  = BRCMU_CHAN_BAND_5G;
++	ch.bw    = BRCMU_CHAN_BW_20;
++	ch.sb    = BRCMU_CHAN_SB_NONE;
++	ch.chnum = 0;
++	ch.control_ch_num = 0;
++
++	cfg->d11inf.encchspec(&ch);
++
++	/* pass encoded chanspec in query */
++	*(__le16 *)pbuf = cpu_to_le16(ch.chspec);
++
++	err = brcmf_fil_iovar_data_get(ifp, "chanspecs", pbuf, buflen);
++	if (err) {
++		brcmf_err("chanspec failed (%d)\n", err);
++		return err;
++	}
++
++	/* Skip DFS and invalid P2P channel */
++	total = le32_to_cpu(list->count);
++	brcmf_info(" total (%d)\n", total);
++	for (i = 0; i < total; i++) {
++		ch.chspec = (u16)le32_to_cpu(list->element[i]);
++		cfg->d11inf.decchspec(&ch);
++
++		brcmf_info("chspec:%d (0x%08x) chnum %d  control_ch_num:%d\n",
++			   ch.chspec, ch.chspec,
++			   ch.chnum, ch.control_ch_num);
++		brcmf_info("band:%d  bw:%d sb:%d\n",
++			   ch.band, ch.bw, ch.sb);
++
++		cfg->d11inf.encchspec(&ch);
++		chaninfo = ch.chspec;
++		err = brcmf_fil_bsscfg_int_get(ifp, "per_chan_info",
++					       &chaninfo);
++		if (err) {
++			brcmf_err("get per_chan_info failed, error = %d\n",
++				  err);
++			return err;
++		}
++
++		is_p2p_channel =
++			brcmf_cfg80211_valid_channel_p2p(CHSPEC_CHANNEL(chaninfo));
++
++		if ((chaninfo & WL_CHAN_RADAR) ||
++		    (chaninfo & WL_CHAN_PASSIVE) ||
++		    !is_p2p_channel) {
++			brcmf_dbg(TRACE, "skip RADAR or non_P2P channel");
++			continue;
++		} else {
++			list->element[j] = list->element[i];
++			j++;
++		}
++	}
++
++	list->count = j;
++
++	return err;
++}
++
+ static s32 brcmf_translate_country_code(struct brcmf_pub *drvr, char alpha2[2],
+ 					struct brcmf_fil_country_le *ccreq)
+ {
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.h
+index 6fa1a5c9d1ae..f599a0a1347b 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.h
+@@ -188,6 +188,12 @@ enum brcmf_vif_status {
+ 	BRCMF_VIF_STATUS_ASSOC_SUCCESS,
+ };
+ 
++enum brcmf_pktype {
++	BRCMF_PKTTYPE_BEACON_FLAG = 0x1,
++	BRCMF_PKTTYPE_PRBRSP_FLAG = 0x2,
++	BRCMF_PKTTYPE_ASSOCRESP_FLAG = 0x4,
++};
++
+ enum brcmf_cfg80211_pm_state {
+ 	BRCMF_CFG80211_PM_STATE_RESUMED,
+ 	BRCMF_CFG80211_PM_STATE_RESUMING,
+@@ -382,6 +388,7 @@ struct brcmf_cfg80211_info {
+ 	struct brcmf_cfg80211_wowl wowl;
+ 	struct brcmf_pno_info *pno;
+ 	u8 ac_priority[MAX_8021D_PRIO];
++	bool hidden_ssid;
+ 	u8 pm_state;
+ 	u8 num_softap;
+ };
+@@ -399,6 +406,45 @@ struct brcmf_tlv {
+ 	u8 data[1];
+ };
+ 
++#define VNDR_IE_CMD_LEN	4	/* len of set cmd string:"add","del"(+ NUL) */
++
++/* tag_ID/length/value_buffer tuple */
++struct tlv_t {
++	u8   id;
++	u8   len;
++	u8   oui[3];
++	u8 oui_type;
++	u8   data[1];
++};
++
++struct ie_info {
++	u32 pktflag;	/* bitmask indicating which packet(s) contain this IE */
++	struct brcmf_tlv ie_data;        /* IE data */
++};
++
++struct ie_buf {
++	int iecount;  /* number of entries in the ie_list[] array */
++	struct ie_info ie_list[1]; /* variable size list of ie_info_t structs */
++};
++
++struct ie_setbuf {
++	char cmd[VNDR_IE_CMD_LEN]; /* ie IOVar set command : "add" + NUL */
++	struct ie_buf ie_buffer;     /* buffer containing IE list information */
++};
++
++static inline u32
++brcmf_get_drv_status_all(struct brcmf_cfg80211_info *cfg, s32 status)
++{
++	struct brcmf_cfg80211_vif *vif, *next;
++	u32 cnt = 0;
++
++	list_for_each_entry_safe(vif, next, &cfg->vif_list, list) {
++		if (test_bit(status, &vif->sme_state))
++			cnt++;
++	}
++	return cnt;
++}
++
+ static inline struct wiphy *cfg_to_wiphy(struct brcmf_cfg80211_info *cfg)
+ {
+ 	return cfg->wiphy;
+@@ -452,6 +498,16 @@ brcmf_cfg80211_connect_info *cfg_to_conn(struct brcmf_cfg80211_info *cfg)
+ struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
+ 						  struct cfg80211_ops *ops,
+ 						  bool p2pdev_forced);
++
++/* Auto Channel Selection */
++#define CHANSPEC_BUF_SIZE	1024
++
++s32 brcmf_cfg80211_get_chanspecs_5g(struct brcmf_if *ifp, void *pbuf,
++				    s32 buflen);
++s32 brcmf_cfg80211_get_chanspecs_2g(struct brcmf_if *ifp, void *pbuf,
++				    s32 buflen);
++int brcmf_cfg80211_get_sta_channel(struct brcmf_if *ifp);
++int brcmf_cfg80211_set_spect(struct brcmf_if *ifp, int spect);
+ void brcmf_cfg80211_detach(struct brcmf_cfg80211_info *cfg);
+ s32 brcmf_cfg80211_up(struct net_device *ndev);
+ s32 brcmf_cfg80211_down(struct net_device *ndev);
+@@ -488,4 +544,9 @@ int brcmf_setup_wiphybands(struct brcmf_cfg80211_info *cfg);
+ struct brcmf_if *brcmf_cfg80211_register_if(struct device *dev,
+ 					    struct brcmf_mp_device *settings);
+ #endif
++
++s32 brcmf_cfg80211_set_ap_wps_p2p_ie(struct brcmf_cfg80211_vif *vif,
++				     char *buf, int len,
++				     enum brcmf_pktype type);
++
+ #endif /* BRCMFMAC_CFG80211_H */
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+index c0039f3565fe..8f0131705e56 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+@@ -10,8 +10,6 @@
+ #include <linux/firmware.h>
+ #include <brcmu_wifi.h>
+ #include <brcmu_utils.h>
+-#include <linux/regulator/consumer.h>
+-#include <linux/of.h>
+ #include "core.h"
+ #include "bus.h"
+ #include "debug.h"
+@@ -25,6 +23,11 @@
+ #include "defs.h"
+ #include "fweh.h"
+ #include <brcm_hw_ids.h>
++#include "defs.h"
++#ifdef CONFIG_BRCMFMAC_ANDROID
++#include <linux/of.h>
++#include <linux/regulator/consumer.h>
++#endif /* CONFIG_BRCMFMAC_ANDROID*/
+ 
+ MODULE_AUTHOR("Broadcom Corporation");
+ MODULE_DESCRIPTION("Broadcom 802.11 wireless LAN fullmac driver.");
+@@ -57,7 +60,12 @@ MODULE_PARM_DESC(feature_disable, "Disable features");
+ 
+ static char brcmf_firmware_path[BRCMF_FW_ALTPATH_LEN];
+ module_param_string(alternative_fw_path, brcmf_firmware_path,
+-		    BRCMF_FW_ALTPATH_LEN, 0600);
++		    BRCMF_FW_ALTPATH_LEN,
++#if defined(CONFIG_BRCMFMAC_ANDROID)
++		    0600); /* S_IRUSR | S_IWUSR */
++#else
++		    0400); /* S_IRUSR */
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ MODULE_PARM_DESC(alternative_fw_path, "Alternative firmware path");
+ 
+ static int brcmf_fcmode;
+@@ -93,7 +101,9 @@ MODULE_PARM_DESC(ignore_probe_fail, "always succeed probe for debugging");
+ 
+ static struct brcmfmac_platform_data *brcmfmac_pdata;
+ struct brcmf_mp_global_t brcmf_mp_global;
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ struct regulator *wifi_regulator;
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ void brcmf_c_set_joinpref_default(struct brcmf_if *ifp)
+ {
+@@ -582,7 +592,6 @@ static int brcmf_common_pd_remove(struct platform_device *pdev)
+ #endif
+ 		regulator_put(wifi_regulator);
+ 		wifi_regulator = NULL;
+-		}
+ 	}
+ 	return 0;
+ }
+@@ -594,6 +603,7 @@ static struct platform_driver brcmf_pd = {
+ 	}
+ };
+ 
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ static const struct of_device_id wifi_device_dt_match[] = {
+ 	{ .compatible = "brcm,android-fmac", },
+ 	{},
+@@ -607,6 +617,7 @@ static struct platform_driver brcmf_platform_dev_driver = {
+ 		.of_match_table = wifi_device_dt_match,
+ 	}
+ };
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ static int __init brcmfmac_module_init(void)
+ {
+@@ -617,11 +628,13 @@ static int __init brcmfmac_module_init(void)
+ 	if (err == -ENODEV)
+ 		brcmf_dbg(INFO, "No platform data available.\n");
+ 
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 	if (err) {
+ 		err = platform_driver_register(&brcmf_platform_dev_driver);
+ 		if (err)
+ 			brcmf_err("platform_driver_register failed\n");
+ 	}
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ 	/* Initialize global module parameters */
+ 	brcmf_mp_attach();
+@@ -631,8 +644,10 @@ static int __init brcmfmac_module_init(void)
+ 	if (err) {
+ 		if (brcmfmac_pdata)
+ 			platform_driver_unregister(&brcmf_pd);
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 		if (wifi_regulator)
+ 			platform_driver_unregister(&brcmf_platform_dev_driver);
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 	}
+ 
+ 	return err;
+@@ -643,6 +658,10 @@ static void __exit brcmfmac_module_exit(void)
+ 	brcmf_core_exit();
+ 	if (brcmfmac_pdata)
+ 		platform_driver_unregister(&brcmf_pd);
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	if (wifi_regulator)
++		platform_driver_unregister(&brcmf_platform_dev_driver);
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ }
+ 
+ module_init(brcmfmac_module_init);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.h
+index 37237bfaf806..317382b2dc28 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.h
+@@ -29,7 +29,9 @@ struct brcmf_mp_global_t {
+ };
+ 
+ extern struct brcmf_mp_global_t brcmf_mp_global;
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ extern struct regulator *wifi_regulator;
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ /**
+  * struct brcmf_mp_device - Device module paramaters.
+  *
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index 49d59b9389ce..99cef546c408 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -47,25 +47,19 @@
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ #define MAX_WAIT_FOR_BUS_START			msecs_to_jiffies(60000)
++
+ struct brcmf_pub *g_drvr;
+-#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+-#ifdef CONFIG_BRCMFMAC_ANDROID
+ static int brcmf_android_netdev_open(struct net_device *ndev);
+ static int brcmf_android_netdev_stop(struct net_device *ndev);
+-static int brcmf_android_ioctl_entry(struct net_device *net,
+-				     struct ifreq *ifr, int cmd);
+ static netdev_tx_t brcmf_android_netdev_start_xmit(struct sk_buff *skb,
+ 						   struct net_device *ndev);
+ static int brcmf_android_netdev_set_mac_address(struct net_device *ndev,
+ 						void *addr);
+ static int brcmf_android_net_p2p_open(struct net_device *ndev);
+ static int brcmf_android_net_p2p_stop(struct net_device *ndev);
+-static int brcmf_android_priv_cmd(struct net_device *ndev, struct ifreq *ifr,
+-				  int cmd);
+ static netdev_tx_t brcmf_android_net_p2p_start_xmit(struct sk_buff *skb,
+ 						    struct net_device *ndev);
+-#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+ struct d11rxhdr_le {
+ 	__le16 RxFrameSize;
+@@ -100,6 +94,11 @@ struct wlc_d11rxhdr {
+ 	spin_unlock_irqrestore(&(ifp)->sta_list_lock, (flags))
+ 
+ #define BRCMF_STA_NULL ((struct brcmf_sta *)NULL)
++static int brcmf_android_priv_cmd(struct net_device *ndev, struct ifreq *ifr,
++				  int cmd);
++static int brcmf_android_ioctl_entry(struct net_device *net,
++				     struct ifreq *ifr, int cmd);
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+ char *brcmf_ifname(struct brcmf_if *ifp)
+ {
+@@ -180,12 +179,12 @@ static void _brcmf_set_multicast_list(struct work_struct *work)
+ 	u32 buflen;
+ 	s32 err;
+ 
++	brcmf_dbg(TRACE, "Enter, bsscfgidx=%d\n", ifp->bsscfgidx);
++
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_android_wake_lock(ifp->drvr);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+-	brcmf_dbg(TRACE, "Enter, bsscfgidx=%d\n", ifp->bsscfgidx);
+-
+ 	ndev = ifp->ndev;
+ 
+ 	/* Determine initial value of allmulti flag */
+@@ -238,7 +237,6 @@ static void _brcmf_set_multicast_list(struct work_struct *work)
+ 	if (err < 0)
+ 		bphy_err(drvr, "Setting BRCMF_C_SET_PROMISC failed, %d\n",
+ 			 err);
+-
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_android_wake_unlock(ifp->drvr);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+@@ -629,7 +627,7 @@ static void brcmf_ethtool_get_drvinfo(struct net_device *ndev,
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	if (!brcmf_android_wifi_is_on(drvr) ||
+-	    brcmf_android_in_reset(drvr)) {
++		brcmf_android_in_reset(drvr)) {
+ 		brcmf_dbg(INFO, "wifi is not ready\n");
+ 		return;
+ 	}
+@@ -699,12 +697,20 @@ static int brcmf_netdev_open(struct net_device *ndev)
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ static const struct net_device_ops brcmf_netdev_ops_pri = {
++#if !defined(CONFIG_BRCMFMAC_ANDROID)
++	.ndo_open = brcmf_netdev_open,
++	.ndo_stop = brcmf_netdev_stop,
++	.ndo_start_xmit = brcmf_netdev_start_xmit,
++	.ndo_set_mac_address = brcmf_netdev_set_mac_address,
++	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list,
++#elif defined(CONFIG_BRCMFMAC_ANDROID)
+ 	.ndo_open = brcmf_android_netdev_open,
+ 	.ndo_stop = brcmf_android_netdev_stop,
+ 	.ndo_do_ioctl = brcmf_android_ioctl_entry,
+ 	.ndo_start_xmit = brcmf_android_netdev_start_xmit,
+ 	.ndo_set_mac_address = brcmf_android_netdev_set_mac_address,
+ 	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list
++#endif /* !defined(CONFIG_BRCMFMAC_ANDROID) */
+ };
+ #else
+ static const struct net_device_ops brcmf_netdev_ops_pri = {
+@@ -985,9 +991,13 @@ static void brcmf_del_if(struct brcmf_pub *drvr, s32 bsscfgidx,
+ 
+ void brcmf_remove_interface(struct brcmf_if *ifp, bool rtnl_locked)
+ {
++	struct brcmf_pub *drvr;
++
+ 	if (!ifp || WARN_ON(ifp->drvr->iflist[ifp->bsscfgidx] != ifp))
+ 		return;
+ 
++	drvr = ifp->drvr;
++
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	if (ifp->bsscfgidx == 0)
+ 		return;
+@@ -997,12 +1007,12 @@ void brcmf_remove_interface(struct brcmf_if *ifp, bool rtnl_locked)
+ 		  ifp->ifidx);
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-	mutex_lock(&ifp->drvr->net_if_lock);
++	mutex_lock(&drvr->net_if_lock);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 	brcmf_proto_del_if(ifp->drvr, ifp);
+ 	brcmf_del_if(ifp->drvr, ifp->bsscfgidx, rtnl_locked);
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-	mutex_unlock(&ifp->drvr->net_if_lock);
++	mutex_unlock(&drvr->net_if_lock);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ }
+ 
+@@ -1170,7 +1180,6 @@ static int brcmf_inet6addr_changed(struct notifier_block *nb,
+ }
+ #endif
+ 
+-
+ int brcmf_fwlog_attach(struct device *dev)
+ {
+ 	struct brcmf_bus *bus_if = dev_get_drvdata(dev);
+@@ -1212,7 +1221,9 @@ static void brcmf_core_bus_reset(struct work_struct *work)
+ {
+ 	struct brcmf_pub *drvr = container_of(work, struct brcmf_pub,
+ 					      bus_reset);
+-
++#if defined(CONFIG_BRCMFMAC_ANDROID)
++	brcmf_android_set_reset(drvr, true);
++#endif
+ 	brcmf_bus_reset(drvr->bus_if);
+ }
+ 
+@@ -1961,6 +1972,86 @@ brcmf_set_country(struct net_device *ndev, char *country)
+ }
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
++static
++int brcmf_android_ioctl_entry(struct net_device *net, struct ifreq *ifr,
++			      int cmd)
++{
++	struct brcmf_if *ifp = netdev_priv(net);
++	int ret = -EOPNOTSUPP;
++
++	brcmf_android_wake_lock(ifp->drvr);
++
++	if (brcmf_android_is_attached(ifp->drvr)) {
++		if (cmd == SIOCDEVPRIVATE + 1)
++			ret = brcmf_android_priv_cmd(net, ifr, cmd);
++	}
++
++	brcmf_android_wake_unlock(ifp->drvr);
++
++	return ret;
++}
++
++int brcmf_android_priv_cmd(struct net_device *ndev, struct ifreq *ifr, int cmd)
++{
++	struct brcmf_if *ifp = netdev_priv(ndev);
++	int ret = 0;
++	char *command = NULL;
++	int bytes_written = 0;
++	struct brcmf_android_wifi_priv_cmd priv_cmd;
++
++	if (copy_from_user(&priv_cmd, ifr->ifr_data,
++			   sizeof(struct brcmf_android_wifi_priv_cmd))) {
++		ret = -EFAULT;
++		goto exit;
++	}
++
++	if (priv_cmd.total_len > PRIVATE_COMMAND_MAX_LEN ||
++	    priv_cmd.total_len < 0) {
++		brcmf_err("too long priavte command\n");
++		ret = -EINVAL;
++		goto exit;
++	}
++	command = kmalloc((priv_cmd.total_len + 1), GFP_KERNEL);
++	if (!command) {
++		ret = -ENOMEM;
++		goto exit;
++	}
++	if (copy_from_user(command, priv_cmd.buf, priv_cmd.total_len)) {
++		ret = -EFAULT;
++		goto exit;
++	}
++
++	command[priv_cmd.total_len] = '\0';
++
++	brcmf_dbg(INFO, "Android private cmd \"%s\" on %s\n",
++		  command, ifr->ifr_name);
++
++	bytes_written = brcmf_handle_private_cmd(ifp->drvr, ndev, command,
++						 priv_cmd.total_len);
++
++	if (bytes_written >= 0) {
++		if (bytes_written == 0 && priv_cmd.total_len > 0)
++			command[0] = '\0';
++		if (bytes_written >= priv_cmd.total_len) {
++			brcmf_err("bytes_written = %d\n", bytes_written);
++			bytes_written = priv_cmd.total_len;
++		} else {
++			bytes_written++;
++		}
++		priv_cmd.used_len = bytes_written;
++		if (copy_to_user(priv_cmd.buf, command, bytes_written)) {
++			brcmf_err("failed to copy data to user buffer\n");
++			ret = -EFAULT;
++		}
++	} else {
++		ret = bytes_written;
++	}
++
++exit:
++	kfree(command);
++	return ret;
++}
++
+ static struct brcmfmac_platform_data *brcmfmac_pdata;
+ 
+ int brcmf_set_power(bool on, unsigned long msec)
+@@ -2092,25 +2183,6 @@ int brcmf_android_netdev_stop(struct net_device *ndev)
+ 	return ret;
+ }
+ 
+-static
+-int brcmf_android_ioctl_entry(struct net_device *net, struct ifreq *ifr,
+-			      int cmd)
+-{
+-	struct brcmf_if *ifp = netdev_priv(net);
+-	int ret = -EOPNOTSUPP;
+-
+-	brcmf_android_wake_lock(ifp->drvr);
+-
+-	if (brcmf_android_is_attached(ifp->drvr)) {
+-		if (cmd == SIOCDEVPRIVATE + 1)
+-			ret = brcmf_android_priv_cmd(net, ifr, cmd);
+-	}
+-
+-	brcmf_android_wake_unlock(ifp->drvr);
+-
+-	return ret;
+-}
+-
+ static
+ netdev_tx_t brcmf_android_netdev_start_xmit(struct sk_buff *skb,
+ 					    struct net_device *ndev)
+@@ -2188,67 +2260,6 @@ netdev_tx_t brcmf_android_net_p2p_start_xmit(struct sk_buff *skb,
+ 	return ret;
+ }
+ 
+-int brcmf_android_priv_cmd(struct net_device *ndev, struct ifreq *ifr, int cmd)
+-{
+-	struct brcmf_if *ifp = netdev_priv(ndev);
+-	int ret = 0;
+-	char *command = NULL;
+-	int bytes_written = 0;
+-	struct brcmf_android_wifi_priv_cmd priv_cmd;
+-
+-	if (copy_from_user(&priv_cmd, ifr->ifr_data,
+-			   sizeof(struct brcmf_android_wifi_priv_cmd))) {
+-		ret = -EFAULT;
+-		goto exit;
+-	}
+-
+-	if (priv_cmd.total_len > PRIVATE_COMMAND_MAX_LEN ||
+-	    priv_cmd.total_len < 0) {
+-		brcmf_err("too long priavte command\n");
+-		ret = -EINVAL;
+-		goto exit;
+-	}
+-	command = kmalloc((priv_cmd.total_len + 1), GFP_KERNEL);
+-	if (!command) {
+-		ret = -ENOMEM;
+-		goto exit;
+-	}
+-	if (copy_from_user(command, priv_cmd.buf, priv_cmd.total_len)) {
+-		ret = -EFAULT;
+-		goto exit;
+-	}
+-
+-	command[priv_cmd.total_len] = '\0';
+-
+-	brcmf_dbg(INFO, "Android private cmd \"%s\" on %s\n",
+-		  command, ifr->ifr_name);
+-
+-	bytes_written = brcmf_handle_private_cmd(ifp->drvr, ndev, command,
+-						 priv_cmd.total_len);
+-
+-	if (bytes_written >= 0) {
+-		if (bytes_written == 0 && priv_cmd.total_len > 0)
+-			command[0] = '\0';
+-		if (bytes_written >= priv_cmd.total_len) {
+-			brcmf_err("bytes_written = %d\n", bytes_written);
+-			bytes_written = priv_cmd.total_len;
+-		} else {
+-			bytes_written++;
+-		}
+-		priv_cmd.used_len = bytes_written;
+-		if (copy_to_user(priv_cmd.buf, command, bytes_written)) {
+-			brcmf_err("failed to copy data to user buffer\n");
+-			ret = -EFAULT;
+-		}
+-	} else {
+-		ret = bytes_written;
+-	}
+-
+-exit:
+-	kfree(command);
+-	return ret;
+-}
+-
+ void brcmf_wake_dev_reset_waitq(struct brcmf_pub *drvr, int status)
+ {
+ 	struct brcmf_if *ifp = drvr->iflist[0];
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
+index a1e9caafc67f..b4a08f42cfa2 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/feature.c
+@@ -184,38 +184,26 @@ static void brcmf_feat_iovar_data_set(struct brcmf_if *ifp,
+ static void brcmf_feat_firmware_capabilities(struct brcmf_if *ifp)
+ {
+ 	struct brcmf_pub *drvr = ifp->drvr;
+-	char *caps;
++	char caps[MAX_CAPS_BUFFER_SIZE];
+ 	enum brcmf_feat_id id;
+ 	int i, err = 0;
+ 
+-	caps = kzalloc(BRCMF_MAX_FEATURE_STR, GFP_KERNEL);
+-	if (!caps) {
+-		err = -ENOMEM;
+-		goto exit;
++	err = brcmf_fil_iovar_data_get(ifp, "cap", caps, sizeof(caps));
++	if (err) {
++		bphy_err(drvr, "could not get firmware cap (%d)\n", err);
++		return;
+ 	}
+ 
+-	err = brcmf_fil_iovar_data_get(ifp, "cap", caps, BRCMF_MAX_FEATURE_STR);
+-	if (err)
+-		goto exit;
+-
+ 	brcmf_dbg(INFO, "[ %s]\n", caps);
+ 
+ 	for (i = 0; i < ARRAY_SIZE(brcmf_fwcap_map); i++) {
+-		if (strnstr(caps, brcmf_fwcap_map[i].fwcap_id,
+-			    BRCMF_MAX_FEATURE_STR)) {
++		if (strnstr(caps, brcmf_fwcap_map[i].fwcap_id, sizeof(caps))) {
+ 			id = brcmf_fwcap_map[i].feature;
+ 			brcmf_dbg(INFO, "enabling feature: %s\n",
+ 				  brcmf_feat_names[id]);
+ 			ifp->drvr->feat_flags |= BIT(id);
+ 		}
+ 	}
+-
+-exit:
+-	kfree(caps);
+-
+-	if (err)
+-		brcmf_err("could not get firmware cap (%d)\n", err);
+-	return;
+ }
+ 
+ /**
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
+index a27ae326e6ed..b1754fc7ce4e 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
+@@ -10,7 +10,6 @@
+ #include <linux/firmware.h>
+ #include <linux/module.h>
+ #include <linux/bcm47xx_nvram.h>
+-#include <linux/wakelock.h>
+ 
+ #include "debug.h"
+ #include "firmware.h"
+@@ -18,6 +17,7 @@
+ #include "common.h"
+ #include "chip.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
++#include <linux/wakelock.h>
+ #include "bus.h"
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h
+index e63e50773aa7..f7ae18f70b16 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.h
+@@ -9,11 +9,11 @@
+ 
+ #define	BRCMF_FW_NAME_LEN		320
+ 
+-#ifdef CONFIG_BRCMFMAC_ANDROID
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ #define BRCMF_FW_DEFAULT_PATH		""
+ #else
+ #define BRCMF_FW_DEFAULT_PATH		"brcm/"
+-#endif
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ /**
+  * struct brcmf_firmware_mapping - Used to map chipid/revmask to firmware
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
+index 2d1cc3968bde..aac5b1e72903 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.c
+@@ -98,8 +98,12 @@ brcmf_fil_cmd_data(struct brcmf_if *ifp, u32 cmd, void *data, u32 len, bool set)
+ 	struct brcmf_pub *drvr = ifp->drvr;
+ 	s32 err, fwerr;
+ 
+-	if (drvr->bus_if->state != BRCMF_BUS_UP || !drvr->proto) {
+-		bphy_err(drvr, "bus is down. we have nothing to do.\n");
++	if (drvr->bus_if->state != BRCMF_BUS_UP ||
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	    !drvr->proto ||
++#endif /* CONFIG_BRCMFMAC_ANDROID */
++	    false) {
++		brcmf_err("bus is down. we have nothing to do.\n");
+ 		return -EIO;
+ 	}
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
+index f2e00a3c19e0..14c96162302b 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil.h
+@@ -41,6 +41,7 @@
+ #define BRCMF_C_REASSOC				53
+ #define BRCMF_C_SET_ROAM_TRIGGER		55
+ #define BRCMF_C_SET_ROAM_DELTA			57
++#define BRCMF_C_SET_MACLIST			70
+ #define BRCMF_C_GET_BCNPRD			75
+ #define BRCMF_C_SET_BCNPRD			76
+ #define BRCMF_C_GET_DTIMPRD			77
+@@ -49,6 +50,7 @@
+ #define BRCMF_C_GET_PM				85
+ #define BRCMF_C_SET_PM				86
+ #define BRCMF_C_GET_REVINFO			98
++#define BRCMF_C_SET_MACMODE			106
+ #define BRCMF_C_GET_CURR_RATESET		114
+ #define BRCMF_C_GET_AP				117
+ #define BRCMF_C_SET_AP				118
+@@ -61,6 +63,8 @@
+ #define BRCMF_C_GET_BSS_INFO			136
+ #define BRCMF_C_GET_GET_PKTCNTS			137
+ #define BRCMF_C_GET_BANDLIST			140
++#define BRCMF_C_GET_BAND			141
++#define BRCMF_C_SET_BAND			142
+ #define BRCMF_C_SET_SCB_TIMEOUT			158
+ #define BRCMF_C_GET_ASSOCLIST			159
+ #define BRCMF_C_GET_PHYLIST			180
+@@ -68,10 +72,14 @@
+ #define BRCMF_C_SET_SCAN_UNASSOC_TIME		187
+ #define BRCMF_C_SCB_DEAUTHENTICATE_FOR_REASON	201
+ #define BRCMF_C_SET_ASSOC_PREFER		205
++#define BRCMF_C_GET_CHANNEL_SEL			215
++#define BRCMF_C_START_CHANNEL_SEL		216
+ #define BRCMF_C_GET_VALID_CHANNELS		217
+ #define BRCMF_C_SET_FAKEFRAG			219
+ #define BRCMF_C_GET_KEY_PRIMARY			235
+ #define BRCMF_C_SET_KEY_PRIMARY			236
++#define BRCMF_C_SET_SPECT_MANAGEMENT		244
++#define BRCMF_C_GET_SPECT_MANAGEMENT		245
+ #define BRCMF_C_SET_SCAN_PASSIVE_TIME		258
+ #define BRCMF_C_GET_VAR				262
+ #define BRCMF_C_SET_VAR				263
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil_types.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil_types.h
+index b7c16dc605c4..13762d0f1c03 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil_types.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/fwil_types.h
+@@ -341,7 +341,8 @@ struct brcmf_bss_info_le {
+ 	u8 ctl_ch;		/* 802.11N BSS control channel number */
+ 	__le32 reserved32[1];	/* Reserved for expansion of BSS properties */
+ 	u8 flags;		/* flags */
+-	u8 reserved[3];	/* Reserved for expansion of BSS properties */
++	u8 vht_cap;           /**< BSS is vht capable */
++	u8 reserved[2];	/* Reserved for expansion of BSS properties */
+ 	u8 basic_mcs[BRCMF_MCSSET_LEN];	/* 802.11N BSS required MCS set */
+ 
+ 	__le16 ie_offset;	/* offset at which IEs start, from beginning */
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+index d8ab8fb04d16..3d8af05fc6bb 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+@@ -39,7 +39,10 @@
+ #include "core.h"
+ #include "common.h"
+ #include "cfg80211.h"
+-
++#ifdef CONFIG_BRCMFMAC_ANDROID
++#include <linux/wakelock.h>
++#include "android.h"
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+ enum brcmf_pcie_state {
+ 	BRCMFMAC_PCIE_STATE_DOWN,
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pno.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pno.c
+index f9d1d8ba0aa7..cfa69d7e18f6 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pno.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pno.c
+@@ -530,6 +530,7 @@ void brcmf_pno_detach(struct brcmf_cfg80211_info *cfg)
+ 	pi = cfg->pno;
+ 	if (!pi)
+ 		return;
++
+ 	cfg->pno = NULL;
+ 
+ 	WARN_ON(pi->n_reqs);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/proto.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/proto.h
+index bc03214aefdf..57495b707b85 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/proto.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/proto.h
+@@ -88,7 +88,9 @@ static inline void
+ brcmf_proto_configure_addr_mode(struct brcmf_pub *drvr, int ifidx,
+ 				enum proto_addr_mode addr_mode)
+ {
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 	if (drvr && drvr->proto)
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 		drvr->proto->configure_addr_mode(drvr, ifidx, addr_mode);
+ }
+ static inline void
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+index dd2c7bcdabff..31bf61ed62c7 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+@@ -23,7 +23,6 @@
+ #include <linux/bcma/bcma.h>
+ #include <linux/debugfs.h>
+ #include <linux/vmalloc.h>
+-#include <linux/wakelock.h>
+ #include <asm/unaligned.h>
+ #include <defs.h>
+ #include <brcmu_wifi.h>
+@@ -38,6 +37,7 @@
+ #include "bcdc.h"
+ #include "fwil.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
++#include <linux/wakelock.h>
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+@@ -2078,6 +2078,7 @@ static uint brcmf_sdio_readframes(struct brcmf_sdio *bus, uint maxframes)
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_android_wake_unlock_timeout(bus->sdiodev->bus_if->drvr);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
++
+ 	return rxcount;
+ }
+ 
+@@ -4802,10 +4803,16 @@ void brcmf_sdio_remove(struct brcmf_sdio *bus)
+ 			bus->watchdog_tsk = NULL;
+ 		}
+ 
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 		brcmf_detach(bus->sdiodev->dev);
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 		/* De-register interrupt handler */
+ 		brcmf_sdiod_intr_unregister(bus->sdiodev);
+ 
++#if !defined(CONFIG_BRCMFMAC_ANDROID)
++		brcmf_detach(bus->sdiodev->dev);
++#endif /* !defined(CONFIG_BRCMFMAC_ANDROID) */
++
+ 		cancel_work_sync(&bus->datawork);
+ 		if (bus->brcmf_wq)
+ 			destroy_workqueue(bus->brcmf_wq);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+index 41fc276dd55f..9ed60279556a 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.c
+@@ -4,7 +4,6 @@
+  */
+ 
+ #include <linux/vmalloc.h>
+-#include <linux/wakelock.h>
+ #include <net/cfg80211.h>
+ #include <net/netlink.h>
+ 
+@@ -18,115 +17,10 @@
+ #include "fwil.h"
+ #include "feature.h"
+ #ifdef CONFIG_BRCMFMAC_ANDROID
++#include <linux/wakelock.h>
+ #include "android.h"
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+-enum andr_vendor_subcmd {
+-	GSCAN_SUBCMD_GET_CAPABILITIES = 0x1000,
+-	GSCAN_SUBCMD_SET_CONFIG,
+-	GSCAN_SUBCMD_SET_SCAN_CONFIG,
+-	GSCAN_SUBCMD_ENABLE_GSCAN,
+-	GSCAN_SUBCMD_GET_SCAN_RESULTS,
+-	GSCAN_SUBCMD_SCAN_RESULTS,
+-	GSCAN_SUBCMD_SET_HOTLIST,
+-	GSCAN_SUBCMD_SET_SIGNIFICANT_CHANGE_CONFIG,
+-	GSCAN_SUBCMD_ENABLE_FULL_SCAN_RESULTS,
+-	GSCAN_SUBCMD_GET_CHANNEL_LIST,
+-	ANDR_WIFI_SUBCMD_GET_FEATURE_SET,
+-	ANDR_WIFI_SUBCMD_GET_FEATURE_SET_MATRIX,
+-	ANDR_WIFI_RANDOM_MAC_OUI,
+-	ANDR_WIFI_NODFS_CHANNELS,
+-	ANDR_WIFI_SET_COUNTRY
+-};
+-
+-enum gscan_attributes {
+-	GSCAN_ATTRIBUTE_NUM_BUCKETS = 10,
+-	GSCAN_ATTRIBUTE_BASE_PERIOD,
+-	GSCAN_ATTRIBUTE_BUCKETS_BAND,
+-	GSCAN_ATTRIBUTE_BUCKET_ID,
+-	GSCAN_ATTRIBUTE_BUCKET_PERIOD,
+-	GSCAN_ATTRIBUTE_BUCKET_NUM_CHANNELS,
+-	GSCAN_ATTRIBUTE_BUCKET_CHANNELS,
+-	GSCAN_ATTRIBUTE_NUM_AP_PER_SCAN,
+-	GSCAN_ATTRIBUTE_REPORT_THRESHOLD,
+-	GSCAN_ATTRIBUTE_NUM_SCANS_TO_CACHE,
+-	GSCAN_ATTRIBUTE_BAND = GSCAN_ATTRIBUTE_BUCKETS_BAND,
+-
+-	GSCAN_ATTRIBUTE_ENABLE_FEATURE = 20,
+-	GSCAN_ATTRIBUTE_SCAN_RESULTS_COMPLETE,
+-	GSCAN_ATTRIBUTE_FLUSH_FEATURE,
+-	GSCAN_ATTRIBUTE_ENABLE_FULL_SCAN_RESULTS,
+-	GSCAN_ATTRIBUTE_REPORT_EVENTS,
+-	GSCAN_ATTRIBUTE_NUM_OF_RESULTS = 30,
+-	GSCAN_ATTRIBUTE_FLUSH_RESULTS,
+-	GSCAN_ATTRIBUTE_SCAN_RESULTS,
+-	GSCAN_ATTRIBUTE_SCAN_ID,
+-	GSCAN_ATTRIBUTE_SCAN_FLAGS,
+-	GSCAN_ATTRIBUTE_AP_FLAGS,
+-	GSCAN_ATTRIBUTE_NUM_CHANNELS,
+-	GSCAN_ATTRIBUTE_CHANNEL_LIST,
+-	GSCAN_ATTRIBUTE_CH_BUCKET_BITMASK
+-};
+-
+-enum andr_wifi_attr {
+-	ANDR_WIFI_ATTRIBUTE_NUM_FEATURE_SET,
+-	ANDR_WIFI_ATTRIBUTE_FEATURE_SET,
+-	ANDR_WIFI_ATTRIBUTE_RANDOM_MAC_OUI,
+-	ANDR_WIFI_ATTRIBUTE_NODFS_SET,
+-	ANDR_WIFI_ATTRIBUTE_COUNTRY,
+-	ANDR_WIFI_ATTRIBUTE_ND_OFFLOAD_VALUE,
+-	ANDR_WIFI_ATTRIBUTE_TCPACK_SUP_VALUE
+-};
+-
+-#define GSCAN_BG_BAND_MASK	0x1
+-#define GSCAN_A_BAND_MASK	0x2
+-#define GSCAN_DFS_MASK		0x4
+-#define GSCAN_ABG_BAND_MASK	(GSCAN_A_BAND_MASK | GSCAN_BG_BAND_MASK)
+-#define GSCAN_BAND_MASK		(GSCAN_ABG_BAND_MASK | GSCAN_DFS_MASK)
+-
+-/* Basic infrastructure mode */
+-#define WIFI_FEATURE_INFRA		0x0001
+-/* Support for 5 GHz Band */
+-#define WIFI_FEATURE_INFRA_5G		0x0002
+-/* Support for GAS/ANQP */
+-#define WIFI_FEATURE_HOTSPOT		0x0004
+-/* Wifi-Direct */
+-#define WIFI_FEATURE_P2P		0x0008
+-/* Soft AP */
+-#define WIFI_FEATURE_SOFT_AP		0x0010
+-/* Google-Scan APIs */
+-#define WIFI_FEATURE_GSCAN		0x0020
+-/* Neighbor Awareness Networking */
+-#define WIFI_FEATURE_NAN		0x0040
+-/* Device-to-device RTT */
+-#define WIFI_FEATURE_D2D_RTT		0x0080
+-/* Device-to-AP RTT */
+-#define WIFI_FEATURE_D2AP_RTT		0x0100
+-/* Batched Scan (legacy) */
+-#define WIFI_FEATURE_BATCH_SCAN		0x0200
+-/* Preferred network offload */
+-#define WIFI_FEATURE_PNO		0x0400
+-/* Support for two STAs */
+-#define WIFI_FEATURE_ADDITIONAL_STA	0x0800
+-/* Tunnel directed link setup */
+-#define WIFI_FEATURE_TDLS		0x1000
+-/* Support for TDLS off channel */
+-#define WIFI_FEATURE_TDLS_OFFCHANNEL	0x2000
+-/* Enhanced power reporting */
+-#define WIFI_FEATURE_EPR		0x4000
+-/* Support for AP STA Concurrency */
+-#define WIFI_FEATURE_AP_STA		0x8000
+-/* Support for Linkstats */
+-#define WIFI_FEATURE_LINKSTAT		0x10000
+-/* WiFi PNO enhanced */
+-#define WIFI_FEATURE_HAL_EPNO		0x40000
+-/* RSSI Monitor */
+-#define WIFI_FEATURE_RSSI_MONITOR	0x80000
+-/* ND offload configure */
+-#define WIFI_FEATURE_CONFIG_NDO		0x200000
+-/* Invalid Feature */
+-#define WIFI_FEATURE_INVALID		0xFFFFFFFF
+-
+ static int brcmf_cfg80211_vndr_cmds_dcmd_handler(struct wiphy *wiphy,
+ 						 struct wireless_dev *wdev,
+ 						 const void *data, int len)
+@@ -233,6 +127,7 @@ static int brcmf_cfg80211_vndr_cmds_dcmd_handler(struct wiphy *wiphy,
+ 	return ret;
+ }
+ 
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ static int
+ brcmf_cfg80211_gscan_get_channel_list_handler(struct wiphy *wiphy,
+ 					      struct wireless_dev *wdev,
+@@ -411,6 +306,258 @@ brcmf_cfg80211_andr_set_country_handler(struct wiphy *wiphy,
+ 	return ret;
+ }
+ 
++static int
++brcmf_cfg80211_andr_set_rand_mac_oui(struct wiphy *wiphy,
++				     struct wireless_dev *wdev,
++				     const void *data, int len)
++{
++	struct brcmf_cfg80211_vif *vif;
++	struct brcmf_if *ifp;
++	int ret = 0;
++	int type;
++	char *oui;
++	char rand_mac_oui[DOT11_OUI_LEN];
++
++	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
++	ifp = vif->ifp;
++
++	brcmf_android_wake_lock(ifp->drvr);
++
++	brcmf_dbg(TRACE, "ifidx=%d, enter\n", ifp->ifidx);
++
++	type = nla_type(data);
++	if (type == ANDR_WIFI_ATTRIBUTE_RANDOM_MAC_OUI) {
++		if (nla_len(data) != DOT11_OUI_LEN) {
++			brcmf_err("nla_len not matched.\n");
++			ret = -EINVAL;
++			goto exit;
++		}
++
++		oui = nla_data(data);
++		memcpy(rand_mac_oui, oui, DOT11_OUI_LEN);
++		/* Clear multi bit */
++		rand_mac_oui[0] &= 0xFE;
++		/* Set locally administered */
++		rand_mac_oui[0] |= 0x02;
++		ret = brcmf_fil_iovar_data_set(ifp, "pfn_macaddr",
++					       &rand_mac_oui,
++					       sizeof(rand_mac_oui));
++		if (ret) {
++			brcmf_err("pfn_macaddr failed, err=%d\n", ret);
++			goto exit;
++		}
++		brcmf_dbg(INFO, "configured random mac: mac=%pM\n",
++			  rand_mac_oui);
++	} else {
++		ret = -EINVAL;
++	}
++
++exit:
++	brcmf_android_wake_unlock(ifp->drvr);
++	return ret;
++}
++
++static int
++brcmf_cfg80211_andr_dbg_start_logging(struct wiphy *wiphy,
++				      struct wireless_dev *wdev,
++				      const void  *data, int len)
++{
++	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
++	return -ENOTSUPP;
++}
++
++static int
++brcmf_cfg80211_andr_dbg_reset_logging(struct wiphy *wiphy,
++				      struct wireless_dev *wdev,
++				      const void  *data, int len)
++{
++	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
++	return -ENOTSUPP;
++}
++
++static int
++brcmf_cfg80211_andr_dbg_trigger_mem_dump(struct wiphy *wiphy,
++					 struct wireless_dev *wdev,
++					 const void  *data, int len)
++{
++	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
++	return -ENOTSUPP;
++}
++
++static int
++brcmf_cfg80211_andr_dbg_get_mem_dump(struct wiphy *wiphy,
++				     struct wireless_dev *wdev,
++				     const void *data, int len)
++{
++	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
++	return -ENOTSUPP;
++}
++
++static int
++brcmf_cfg80211_andr_dbg_get_version(struct wiphy *wiphy,
++				    struct wireless_dev *wdev,
++				    const void *data, int len)
++{
++	struct brcmf_cfg80211_vif *vif;
++	struct brcmf_if *ifp;
++	struct sk_buff *reply;
++	int ret = 0, rem, type;
++	char buf[512];
++	bool fmac_ver;
++	const struct nlattr *iter;
++
++	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
++	if (!vif || !vif->ifp)
++		return -EFAULT;
++	ifp = vif->ifp;
++
++	brcmf_android_wake_lock(ifp->drvr);
++
++	nla_for_each_attr(iter, data, len, rem) {
++		type = nla_type(iter);
++		switch (type) {
++		case DEBUG_ATTRIBUTE_GET_DRIVER:
++			fmac_ver = true;
++			break;
++
++		case DEBUG_ATTRIBUTE_GET_FW:
++			fmac_ver = false;
++			break;
++
++		default:
++			brcmf_err("Unknown type: %d\n", type);
++			ret = -EINVAL;
++			goto exit;
++		}
++	}
++
++	/* TODO: In case of DEBUG_ATTRIBUTE_GET_DRIVER,
++	 *       need to return right fmac driver version.
++	 */
++	memset(buf, 0, sizeof(buf));
++	ret = brcmf_fil_iovar_data_get(ifp, "ver", buf, sizeof(buf));
++
++	if (ret) {
++		brcmf_err("get ver error, ret = %d\n", ret);
++		ret = -EIO;
++		goto exit;
++	}
++	brcmf_dbg(INFO, "Version : %s\n", buf);
++	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, strlen(buf));
++	nla_put_nohdr(reply, strlen(buf), buf);
++	ret = cfg80211_vendor_cmd_reply(reply);
++exit:
++	brcmf_android_wake_unlock(ifp->drvr);
++	return ret;
++}
++
++static int
++brcmf_cfg80211_andr_dbg_get_ring_status(struct wiphy *wiphy,
++					struct wireless_dev *wdev,
++					const void  *data, int len)
++{
++	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
++	return -ENOTSUPP;
++}
++
++static int
++brcmf_cfg80211_andr_dbg_get_ring_data(struct wiphy *wiphy,
++				      struct wireless_dev *wdev,
++				      const void  *data, int len)
++{
++	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
++	return -ENOTSUPP;
++}
++
++static int
++brcmf_cfg80211_andr_dbg_get_feature(struct wiphy *wiphy,
++				    struct wireless_dev *wdev,
++				    const void  *data, int len)
++{
++	int ret = 0;
++	struct brcmf_cfg80211_vif *vif;
++	struct brcmf_if *ifp;
++	struct sk_buff *reply;
++	u32 supported_features = 0;
++	char caps[512];
++
++	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
++	ifp = vif->ifp;
++
++	brcmf_android_wake_lock(ifp->drvr);
++
++	ret = brcmf_fil_iovar_data_get(ifp, "cap", caps, sizeof(caps));
++
++	if (ret) {
++		brcmf_err("get capa error, ret = %d\n", ret);
++		goto exit;
++	}
++
++	if (strnstr(caps, "logtrace", sizeof(caps))) {
++		supported_features |= DBG_CONNECT_EVENT_SUPPORTED;
++		supported_features |= DBG_VERBOSE_LOG_SUPPORTED;
++	}
++
++	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(u32));
++	nla_put_nohdr(reply, sizeof(u32), &supported_features);
++	ret = cfg80211_vendor_cmd_reply(reply);
++exit:
++	brcmf_android_wake_unlock(ifp->drvr);
++
++	return ret;
++}
++
++static int
++brcmf_cfg80211_andr_get_wake_reason_stats(struct wiphy *wiphy,
++					  struct wireless_dev *wdev,
++					  const void *data, int len)
++{
++	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
++	return -ENOTSUPP;
++}
++
++static int
++brcmf_cfg80211_andr_apf_get_capabilities(struct wiphy *wiphy,
++					 struct wireless_dev *wdev,
++					 const void *data, int len)
++{
++	int ret = 0, ver;
++	struct brcmf_cfg80211_vif *vif;
++	struct brcmf_if *ifp;
++	struct sk_buff *reply;
++
++	vif = container_of(wdev, struct brcmf_cfg80211_vif, wdev);
++	ifp = vif->ifp;
++
++	brcmf_android_wake_lock(ifp->drvr);
++	/**
++	 * Notify Android framework that APF is not supported by setting
++	 * version as zero.
++	 */
++	ver = 0;
++
++	reply = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(int));
++	nla_put_u32(reply, APF_ATTRIBUTE_VERSION, ver);
++	ret = cfg80211_vendor_cmd_reply(reply);
++
++	brcmf_android_wake_unlock(ifp->drvr);
++	return ret;
++}
++
++static int
++brcmf_cfg80211_andr_apf_set_filter(struct wiphy *wiphy,
++				   struct wireless_dev *wdev,
++				   const void *data, int len)
++{
++	/* TODO:
++	 * Add here to brcmf_pktfilter_add_remove function
++	 */
++	brcmf_dbg(TRACE, "return UNSUPPORTED\n");
++	return -ENOTSUPP;
++}
++
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
++
+ s32
+ brcmf_wiphy_phy_temp_evt_handler(struct brcmf_if *ifp,
+ 				 const struct brcmf_event_msg *e, void *data)
+@@ -472,6 +619,7 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
+ 		.policy = VENDOR_CMD_RAW_DATA,
+ 		.doit = brcmf_cfg80211_vndr_cmds_dcmd_handler
+ 	},
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ 	{
+ 		{
+ 			.vendor_id = GOOGLE_OUI,
+@@ -502,6 +650,129 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
+ 		.policy = VENDOR_CMD_RAW_DATA,
+ 		.doit = brcmf_cfg80211_andr_get_feature_set_handler
+ 	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = ANDR_WIFI_RANDOM_MAC_OUI
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_set_rand_mac_oui
++	},
++	/* DEBUG ABILITY */
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_START_LOGGING
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_dbg_start_logging
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_TRIGGER_MEM_DUMP
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_dbg_trigger_mem_dump
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_GET_MEM_DUMP
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_dbg_get_mem_dump
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_GET_VER
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_dbg_get_version
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_GET_RING_STATUS
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_dbg_get_ring_status
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_GET_RING_DATA
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_dbg_get_ring_data
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_GET_FEATURE
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_dbg_get_feature
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_RESET_LOGGING
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_dbg_reset_logging
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = DEBUG_GET_WAKE_REASON_STATS
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_get_wake_reason_stats
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = APF_SUBCMD_GET_CAPABILITIES
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_apf_get_capabilities
++	},
++	{
++		{
++			.vendor_id = GOOGLE_OUI,
++			.subcmd = APF_SUBCMD_GET_CAPABILITIES
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
++			 WIPHY_VENDOR_CMD_NEED_NETDEV,
++		.policy = VENDOR_CMD_RAW_DATA,
++		.doit = brcmf_cfg80211_andr_apf_set_filter
++	}
++
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ };
+ 
+ const struct nl80211_vendor_cmd_info brcmf_vendor_events[] = {
+@@ -511,8 +782,10 @@ const struct nl80211_vendor_cmd_info brcmf_vendor_events[] = {
+ 	},
+ };
+ 
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ void brcmf_set_vndr_cmd(struct wiphy *wiphy)
+ {
+ 	wiphy->vendor_commands = brcmf_vendor_cmds;
+ 	wiphy->n_vendor_commands = ARRAY_SIZE(brcmf_vendor_cmds);
+ }
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
+index 4b338c97ab73..4a798c97fde2 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/vendor.h
+@@ -7,7 +7,9 @@
+ #define _vendor_h_
+ 
+ #define BROADCOM_OUI	0x001018
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ #define GOOGLE_OUI	0x001A11
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ enum brcmf_vndr_cmds {
+ 	BRCMF_VNDR_CMDS_UNSPEC,
+@@ -69,6 +71,241 @@ extern const struct nl80211_vendor_cmd_info brcmf_vendor_events[];
+ s32 brcmf_wiphy_phy_temp_evt_handler(struct brcmf_if *ifp,
+ 				     const struct brcmf_event_msg *e,
+ 				     void *data);
++#if defined(CONFIG_BRCMFMAC_ANDROID)
+ void brcmf_set_vndr_cmd(struct wiphy *wiphy);
+ 
++enum {
++	/* don't use 0 as a valid subcommand */
++	VENDOR_NL80211_SUBCMD_UNSPECIFIED,
++
++	/* define all vendor startup commands between 0x0 and 0x0FFF */
++	VENDOR_NL80211_SUBCMD_RANGE_START = 0x0001,
++	VENDOR_NL80211_SUBCMD_RANGE_END   = 0x0FFF,
++
++	/* define all GScan related commands between 0x1000 and 0x10FF */
++	ANDROID_NL80211_SUBCMD_GSCAN_RANGE_START = 0x1000,
++	ANDROID_NL80211_SUBCMD_GSCAN_RANGE_END   = 0x10FF,
++
++	/**
++	 * define all NearbyDiscovery related commands
++	 * between 0x1100 and 0x11FF
++	 */
++	ANDROID_NL80211_SUBCMD_NBD_RANGE_START = 0x1100,
++	ANDROID_NL80211_SUBCMD_NBD_RANGE_END   = 0x11FF,
++
++	/* define all RTT related commands between 0x1100 and 0x11FF */
++	ANDROID_NL80211_SUBCMD_RTT_RANGE_START = 0x1100,
++	ANDROID_NL80211_SUBCMD_RTT_RANGE_END   = 0x11FF,
++
++	ANDROID_NL80211_SUBCMD_LSTATS_RANGE_START = 0x1200,
++	ANDROID_NL80211_SUBCMD_LSTATS_RANGE_END   = 0x12FF,
++
++	/* define all Logger related commands between 0x1400 and 0x14FF */
++	ANDROID_NL80211_SUBCMD_DEBUG_RANGE_START = 0x1400,
++	ANDROID_NL80211_SUBCMD_DEBUG_RANGE_END   = 0x14FF,
++
++	/* define all wifi offload related commands between 0x1600 and 0x16FF */
++	ANDROID_NL80211_SUBCMD_WIFI_OFFLOAD_RANGE_START = 0x1600,
++	ANDROID_NL80211_SUBCMD_WIFI_OFFLOAD_RANGE_END   = 0x16FF,
++
++	/* define all NAN related commands between 0x1700 and 0x17FF */
++	ANDROID_NL80211_SUBCMD_NAN_RANGE_START = 0x1700,
++	ANDROID_NL80211_SUBCMD_NAN_RANGE_END   = 0x17FF,
++
++	/**
++	 * define all Android Packet Filter related commands
++	 * between 0x1800 and 0x18FF
++	 */
++	ANDROID_NL80211_SUBCMD_PKT_FILTER_RANGE_START = 0x1800,
++	ANDROID_NL80211_SUBCMD_PKT_FILTER_RANGE_END   = 0x18FF,
++
++	/* This is reserved for future usage */
++
++};
++
++enum andr_vendor_subcmd {
++	GSCAN_SUBCMD_GET_CAPABILITIES =
++		ANDROID_NL80211_SUBCMD_GSCAN_RANGE_START,
++	GSCAN_SUBCMD_SET_CONFIG,
++	GSCAN_SUBCMD_SET_SCAN_CONFIG,
++	GSCAN_SUBCMD_ENABLE_GSCAN,
++	GSCAN_SUBCMD_GET_SCAN_RESULTS,
++	GSCAN_SUBCMD_SCAN_RESULTS,
++	GSCAN_SUBCMD_SET_HOTLIST,
++	GSCAN_SUBCMD_SET_SIGNIFICANT_CHANGE_CONFIG,
++	GSCAN_SUBCMD_ENABLE_FULL_SCAN_RESULTS,
++	GSCAN_SUBCMD_GET_CHANNEL_LIST,
++	ANDR_WIFI_SUBCMD_GET_FEATURE_SET,
++	ANDR_WIFI_SUBCMD_GET_FEATURE_SET_MATRIX,
++	ANDR_WIFI_RANDOM_MAC_OUI,
++	ANDR_WIFI_NODFS_CHANNELS,
++	ANDR_WIFI_SET_COUNTRY,
++
++	DEBUG_START_LOGGING = ANDROID_NL80211_SUBCMD_DEBUG_RANGE_START,
++	DEBUG_TRIGGER_MEM_DUMP,
++	DEBUG_GET_MEM_DUMP,
++	DEBUG_GET_VER,
++	DEBUG_GET_RING_STATUS,
++	DEBUG_GET_RING_DATA,
++	DEBUG_GET_FEATURE,
++	DEBUG_RESET_LOGGING,
++
++	DEBUG_TRIGGER_DRIVER_MEM_DUMP,
++	DEBUG_GET_DRIVER_MEM_DUMP,
++	DEBUG_START_PKT_FATE_MONITORING,
++	DEBUG_GET_TX_PKT_FATES,
++	DEBUG_GET_RX_PKT_FATES,
++	DEBUG_GET_WAKE_REASON_STATS,
++	DEBUG_GET_FILE_DUMP_BUF,
++	DEBUG_FILE_DUMP_DONE_IND,
++	DEBUG_SET_HAL_START,
++	DEBUG_SET_HAL_STOP,
++
++	APF_SUBCMD_GET_CAPABILITIES =
++		ANDROID_NL80211_SUBCMD_PKT_FILTER_RANGE_START,
++	APF_SUBCMD_SET_FILTER,
++	VENDOR_SUBCMD_MAX
++};
++
++enum gscan_attributes {
++	GSCAN_ATTRIBUTE_NUM_BUCKETS = 10,
++	GSCAN_ATTRIBUTE_BASE_PERIOD,
++	GSCAN_ATTRIBUTE_BUCKETS_BAND,
++	GSCAN_ATTRIBUTE_BUCKET_ID,
++	GSCAN_ATTRIBUTE_BUCKET_PERIOD,
++	GSCAN_ATTRIBUTE_BUCKET_NUM_CHANNELS,
++	GSCAN_ATTRIBUTE_BUCKET_CHANNELS,
++	GSCAN_ATTRIBUTE_NUM_AP_PER_SCAN,
++	GSCAN_ATTRIBUTE_REPORT_THRESHOLD,
++	GSCAN_ATTRIBUTE_NUM_SCANS_TO_CACHE,
++	GSCAN_ATTRIBUTE_BAND = GSCAN_ATTRIBUTE_BUCKETS_BAND,
++
++	GSCAN_ATTRIBUTE_ENABLE_FEATURE = 20,
++	GSCAN_ATTRIBUTE_SCAN_RESULTS_COMPLETE,
++	GSCAN_ATTRIBUTE_FLUSH_FEATURE,
++	GSCAN_ATTRIBUTE_ENABLE_FULL_SCAN_RESULTS,
++	GSCAN_ATTRIBUTE_REPORT_EVENTS,
++	GSCAN_ATTRIBUTE_NUM_OF_RESULTS = 30,
++	GSCAN_ATTRIBUTE_FLUSH_RESULTS,
++	GSCAN_ATTRIBUTE_SCAN_RESULTS,
++	GSCAN_ATTRIBUTE_SCAN_ID,
++	GSCAN_ATTRIBUTE_SCAN_FLAGS,
++	GSCAN_ATTRIBUTE_AP_FLAGS,
++	GSCAN_ATTRIBUTE_NUM_CHANNELS,
++	GSCAN_ATTRIBUTE_CHANNEL_LIST,
++	GSCAN_ATTRIBUTE_CH_BUCKET_BITMASK
++};
++
++enum andr_wifi_attr {
++	ANDR_WIFI_ATTRIBUTE_NUM_FEATURE_SET,
++	ANDR_WIFI_ATTRIBUTE_FEATURE_SET,
++	ANDR_WIFI_ATTRIBUTE_RANDOM_MAC_OUI,
++	ANDR_WIFI_ATTRIBUTE_NODFS_SET,
++	ANDR_WIFI_ATTRIBUTE_COUNTRY,
++	ANDR_WIFI_ATTRIBUTE_ND_OFFLOAD_VALUE,
++	ANDR_WIFI_ATTRIBUTE_TCPACK_SUP_VALUE
++};
++
++enum debug_attributes {
++	DEBUG_ATTRIBUTE_GET_DRIVER,
++	DEBUG_ATTRIBUTE_GET_FW,
++	DEBUG_ATTRIBUTE_RING_ID,
++	DEBUG_ATTRIBUTE_RING_NAME,
++	DEBUG_ATTRIBUTE_RING_FLAGS,
++	DEBUG_ATTRIBUTE_LOG_LEVEL,
++	DEBUG_ATTRIBUTE_LOG_TIME_INTVAL,
++	DEBUG_ATTRIBUTE_LOG_MIN_DATA_SIZE,
++	DEBUG_ATTRIBUTE_DUMP_FILENAME,
++	DEBUG_ATTRIBUTE_FW_DUMP_LEN,
++	DEBUG_ATTRIBUTE_FW_DUMP_DATA,
++	DEBUG_ATTRIBUTE_RING_DATA,
++	DEBUG_ATTRIBUTE_RING_STATUS,
++	DEBUG_ATTRIBUTE_RING_NUM,
++	DEBUG_ATTRIBUTE_DRIVER_DUMP_LEN,
++	DEBUG_ATTRIBUTE_DRIVER_DUMP_DATA,
++	DEBUG_ATTRIBUTE_PKT_FATE_NUM,
++	DEBUG_ATTRIBUTE_PKT_FATE_DATA
++};
++
++enum apf_attributes {
++	APF_ATTRIBUTE_VERSION,
++	APF_ATTRIBUTE_MAX_LEN,
++	APF_ATTRIBUTE_PROGRAM,
++	APF_ATTRIBUTE_PROGRAM_LEN
++};
++
++enum {
++	/* Feature set */
++	/* Memory dump of FW */
++	DBG_MEMORY_DUMP_SUPPORTED = (1 << (0)),
++	/* PKT Status */
++	DBG_PER_PACKET_TX_RX_STATUS_SUPPORTED = (1 << (1)),
++	/* Connectivity Event */
++	DBG_CONNECT_EVENT_SUPPORTED = (1 << (2)),
++	/* POWER of Driver */
++	DBG_POWER_EVENT_SUPOORTED = (1 << (3)),
++	/* WAKE LOCK of Driver */
++	DBG_WAKE_LOCK_SUPPORTED	= (1 << (4)),
++	/* verbose log of FW */
++	DBG_VERBOSE_LOG_SUPPORTED = (1 << (5)),
++	/* monitor the health of FW */
++	DBG_HEALTH_CHECK_SUPPORTED = (1 << (6)),
++	/* dumps driver state */
++	DBG_DRIVER_DUMP_SUPPORTED = (1 << (7)),
++	/* tracks connection packets' fate */
++	DBG_PACKET_FATE_SUPPORTED = (1 << (8)),
++	/* NAN Events */
++	DBG_NAN_EVENT_SUPPORTED = (1 << (9)),
++};
++
++#define GSCAN_BG_BAND_MASK	0x1
++#define GSCAN_A_BAND_MASK	0x2
++#define GSCAN_DFS_MASK		0x4
++#define GSCAN_ABG_BAND_MASK	(GSCAN_A_BAND_MASK | GSCAN_BG_BAND_MASK)
++#define GSCAN_BAND_MASK		(GSCAN_ABG_BAND_MASK | GSCAN_DFS_MASK)
++
++/* Basic infrastructure mode */
++#define WIFI_FEATURE_INFRA		0x0001
++/* Support for 5 GHz Band */
++#define WIFI_FEATURE_INFRA_5G		0x0002
++/* Support for GAS/ANQP */
++#define WIFI_FEATURE_HOTSPOT		0x0004
++/* Wifi-Direct */
++#define WIFI_FEATURE_P2P		0x0008
++/* Soft AP */
++#define WIFI_FEATURE_SOFT_AP		0x0010
++/* Google-Scan APIs */
++#define WIFI_FEATURE_GSCAN		0x0020
++/* Neighbor Awareness Networking */
++#define WIFI_FEATURE_NAN		0x0040
++/* Device-to-device RTT */
++#define WIFI_FEATURE_D2D_RTT		0x0080
++/* Device-to-AP RTT */
++#define WIFI_FEATURE_D2AP_RTT		0x0100
++/* Batched Scan (legacy) */
++#define WIFI_FEATURE_BATCH_SCAN		0x0200
++/* Preferred network offload */
++#define WIFI_FEATURE_PNO		0x0400
++/* Support for two STAs */
++#define WIFI_FEATURE_ADDITIONAL_STA	0x0800
++/* Tunnel directed link setup */
++#define WIFI_FEATURE_TDLS		0x1000
++/* Support for TDLS off channel */
++#define WIFI_FEATURE_TDLS_OFFCHANNEL	0x2000
++/* Enhanced power reporting */
++#define WIFI_FEATURE_EPR		0x4000
++/* Support for AP STA Concurrency */
++#define WIFI_FEATURE_AP_STA		0x8000
++/* Support for Linkstats */
++#define WIFI_FEATURE_LINKSTAT		0x10000
++/* WiFi PNO enhanced */
++#define WIFI_FEATURE_HAL_EPNO		0x40000
++/* RSSI Monitor */
++#define WIFI_FEATURE_RSSI_MONITOR	0x80000
++/* ND offload configure */
++#define WIFI_FEATURE_CONFIG_NDO		0x200000
++/* Invalid Feature */
++#define WIFI_FEATURE_INVALID		0xFFFFFFFF
++#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
++
+ #endif /* _vendor_h_ */
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmutil/utils.c b/drivers/net/wireless/broadcom/brcm80211/brcmutil/utils.c
+index 4c84c3001c3f..ddc170a28692 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmutil/utils.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmutil/utils.c
+@@ -9,6 +9,7 @@
+ #include <linux/module.h>
+ 
+ #include <brcmu_utils.h>
++#include <linux/ctype.h>
+ 
+ MODULE_AUTHOR("Broadcom Corporation");
+ MODULE_DESCRIPTION("Broadcom 802.11n wireless LAN driver utilities.");
+@@ -293,6 +294,32 @@ char *brcmu_dotrev_str(u32 dotrev, char *buf)
+ }
+ EXPORT_SYMBOL(brcmu_dotrev_str);
+ 
++/* parse a xx:xx:xx:xx:xx:xx format ethernet address */
++int
++brcmu_ether_atoe(const char *p,  char *ea)
++{
++	int i = 0;
++	int value = 0;
++	int result = 0, last_result = 0;
++
++	for (i = 0; i < 6; i++) {
++		while (isxdigit(*p) && (value = isdigit(*p) ? *p - '0' :
++		__toupper(*p) - 'A' + 10) < 16) {
++			result = result * 16 + value;
++			/* Detected overflow */
++			last_result = result;
++			p++;
++		}
++		ea[i] = result;
++		p++;
++		result = 0;
++		last_result = 0;
++	}
++
++	return (i == 6);
++}
++EXPORT_SYMBOL(brcmu_ether_atoe);
++
+ #if defined(DEBUG)
+ /* pretty hex print a pkt buffer chain */
+ void brcmu_prpkt(const char *msg, struct sk_buff *p0)
+diff --git a/drivers/net/wireless/broadcom/brcm80211/include/brcmu_wifi.h b/drivers/net/wireless/broadcom/brcm80211/include/brcmu_wifi.h
+index 7552bdb91991..6b43a4e76da2 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/include/brcmu_wifi.h
++++ b/drivers/net/wireless/broadcom/brcm80211/include/brcmu_wifi.h
+@@ -42,11 +42,25 @@
+ #define WL_CHANSPEC_CHAN_MASK		0x00ff
+ #define WL_CHANSPEC_CHAN_SHIFT		0
+ 
+-#define WL_CHANSPEC_CTL_SB_MASK		0x0300
+-#define WL_CHANSPEC_CTL_SB_SHIFT	     8
+-#define WL_CHANSPEC_CTL_SB_LOWER	0x0100
+-#define WL_CHANSPEC_CTL_SB_UPPER	0x0200
+-#define WL_CHANSPEC_CTL_SB_NONE		0x0300
++#define WL_CHANSPEC_CTL_SB_MASK         0x0700
++#define WL_CHANSPEC_CTL_SB_SHIFT        8
++#define WL_CHANSPEC_CTL_SB_LLL          0x0000
++#define WL_CHANSPEC_CTL_SB_LLU          0x0100
++#define WL_CHANSPEC_CTL_SB_LUL          0x0200
++#define WL_CHANSPEC_CTL_SB_LUU          0x0300
++#define WL_CHANSPEC_CTL_SB_ULL          0x0400
++#define WL_CHANSPEC_CTL_SB_ULU          0x0500
++#define WL_CHANSPEC_CTL_SB_UUL          0x0600
++#define WL_CHANSPEC_CTL_SB_UUU          0x0700
++#define WL_CHANSPEC_CTL_SB_LL           WL_CHANSPEC_CTL_SB_LLL
++#define WL_CHANSPEC_CTL_SB_LU           WL_CHANSPEC_CTL_SB_LLU
++#define WL_CHANSPEC_CTL_SB_UL           WL_CHANSPEC_CTL_SB_LUL
++#define WL_CHANSPEC_CTL_SB_UU           WL_CHANSPEC_CTL_SB_LUU
++#define WL_CHANSPEC_CTL_SB_L            WL_CHANSPEC_CTL_SB_LLL
++#define WL_CHANSPEC_CTL_SB_U            WL_CHANSPEC_CTL_SB_LLU
++#define WL_CHANSPEC_CTL_SB_LOWER        WL_CHANSPEC_CTL_SB_LLL
++#define WL_CHANSPEC_CTL_SB_UPPER        WL_CHANSPEC_CTL_SB_LLU
++#define WL_CHANSPEC_CTL_SB_NONE         WL_CHANSPEC_CTL_SB_LLL
+ 
+ #define WL_CHANSPEC_BW_MASK		0x0C00
+ #define WL_CHANSPEC_BW_SHIFT		    10
+-- 
+2.25.0
+

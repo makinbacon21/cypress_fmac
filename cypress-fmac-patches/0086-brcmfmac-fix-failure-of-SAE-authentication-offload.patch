@@ -1,0 +1,32 @@
+From c278c32ce0ed7a7bf826b343a3cf51969fe91b2f Mon Sep 17 00:00:00 2001
+From: Chung-Hsien Hsu <stanley.hsu@cypress.com>
+Date: Mon, 17 Feb 2020 04:19:57 -0600
+Subject: [PATCH 086/130] brcmfmac: fix failure of SAE authentication offload
+
+Setting bit BRCMF_VIF_STATUS_EAP_SUCCESS for SAE offload case in
+brcmf_is_linkup() to fix the failure.
+
+Fixes: 3b1e0a7bdfee ("brcmfmac: add support for SAE authentication
+offload")
+Signed-off-by: Chung-Hsien Hsu <stanley.hsu@cypress.com>
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index 23143d9b9fc8..7b9039cb0f63 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -5608,7 +5608,8 @@ static bool brcmf_is_linkup(struct brcmf_cfg80211_vif *vif,
+ 	u32 event = e->event_code;
+ 	u32 status = e->status;
+ 
+-	if (vif->profile.use_fwsup == BRCMF_PROFILE_FWSUP_PSK &&
++	if ((vif->profile.use_fwsup == BRCMF_PROFILE_FWSUP_PSK ||
++	     vif->profile.use_fwsup == BRCMF_PROFILE_FWSUP_SAE) &&
+ 	    event == BRCMF_E_PSK_SUP &&
+ 	    status == BRCMF_E_STATUS_FWSUP_COMPLETED)
+ 		set_bit(BRCMF_VIF_STATUS_EAP_SUCCESS, &vif->sme_state);
+-- 
+2.25.0
+

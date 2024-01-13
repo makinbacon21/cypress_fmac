@@ -1,0 +1,61 @@
+From 20cd6b519cb66c652997b7254928645c7ab83d36 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Tue, 2 Jun 2020 22:59:35 -0500
+Subject: [PATCH 1/4] No need to bring down interface when setting MAC address
+
+We don't need to bring down interface when setting MAC address, because
+host driver will power down wifi card and HAL will be unable to set MAC
+address.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ wifi/1.3/default/wifi_iface_util.cpp | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/wifi/1.3/default/wifi_iface_util.cpp b/wifi/1.3/default/wifi_iface_util.cpp
+index 34bc02d3f..0993f8184 100644
+--- a/wifi/1.3/default/wifi_iface_util.cpp
++++ b/wifi/1.3/default/wifi_iface_util.cpp
+@@ -52,18 +52,30 @@ std::array<uint8_t, 6> WifiIfaceUtil::getFactoryMacAddress(
+ 
+ bool WifiIfaceUtil::setMacAddress(const std::string& iface_name,
+                                   const std::array<uint8_t, 6>& mac) {
++
++    /* No need to bring down interface for Cypress FMAC modules */
++    /*
+     if (!iface_tool_.lock()->SetUpState(iface_name.c_str(), false)) {
+         LOG(ERROR) << "SetUpState(false) failed.";
+         return false;
+     }
++    */
++
+     if (!iface_tool_.lock()->SetMacAddress(iface_name.c_str(), mac)) {
+         LOG(ERROR) << "SetMacAddress failed.";
+         return false;
+     }
++
++    /* No need to bring down interface for Cypress FMAC modules */
++    /*
+     if (!iface_tool_.lock()->SetUpState(iface_name.c_str(), true)) {
+         LOG(ERROR) << "SetUpState(true) failed.";
+         return false;
+     }
++    */
++
++    /* No need to handle interface event for Cypress FMAC modules */
++    /*
+     IfaceEventHandlers event_handlers = {};
+     const auto it = event_handlers_map_.find(iface_name);
+     if (it != event_handlers_map_.end()) {
+@@ -72,6 +84,8 @@ bool WifiIfaceUtil::setMacAddress(const std::string& iface_name,
+     if (event_handlers.on_state_toggle_off_on != nullptr) {
+         event_handlers.on_state_toggle_off_on(iface_name);
+     }
++    */
++
+     LOG(DEBUG) << "Successfully SetMacAddress.";
+     return true;
+ }
+-- 
+2.25.0
+

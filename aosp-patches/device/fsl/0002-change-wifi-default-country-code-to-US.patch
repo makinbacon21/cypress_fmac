@@ -1,0 +1,30 @@
+From fd4ea44b644e0859e8f63fcf731bdf498ec51378 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Mon, 10 Aug 2020 23:23:27 -0500
+Subject: [PATCH 2/2] change wifi default country code to US
+
+To do full channel tests, we set wifi default country code to US.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+
+JIRA: SWWLAN-139805
+---
+ imx8m/evk_8mq/BoardConfig.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/imx8m/evk_8mq/BoardConfig.mk b/imx8m/evk_8mq/BoardConfig.mk
+index 413e6de4..c1789bf0 100644
+--- a/imx8m/evk_8mq/BoardConfig.mk
++++ b/imx8m/evk_8mq/BoardConfig.mk
+@@ -123,7 +123,7 @@ BOARD_KERNEL_CMDLINE += transparent_hugepage=never cma=$(CMASIZE)
+ BOARD_KERNEL_CMDLINE += androidboot.lcd_density=240 androidboot.primary_display=imx-dcss androidboot.gui_resolution=1080p
+ 
+ # wifi config
+-BOARD_KERNEL_CMDLINE += androidboot.wificountrycode=CN
++BOARD_KERNEL_CMDLINE += androidboot.wificountrycode=US
+ 
+ ifeq ($(TARGET_USERIMAGES_USE_UBIFS),true)
+ ifeq ($(TARGET_USERIMAGES_USE_EXT4),true)
+-- 
+2.25.0
+

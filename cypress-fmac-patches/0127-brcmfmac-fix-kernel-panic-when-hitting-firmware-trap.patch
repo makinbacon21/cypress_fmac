@@ -1,0 +1,76 @@
+From b38a0804f909fa8e64c4b4d5b9b68c1dd29893b0 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Wed, 1 Jul 2020 03:34:14 -0500
+Subject: [PATCH 127/130] brcmfmac: fix kernel panic when hitting firmware trap
+
+We should block TX flow when driver is resetting dongle. And to get
+firmware trap stack trace and console log, we enable FWCON log before
+resetting dongle, so that user is able to get more information from kernel
+log(dmesg).
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+
+---
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c | 6 ++++++
+ drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c | 6 ++++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index 69cdc98ca97c..8629510e0a5a 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -352,7 +352,12 @@ static netdev_tx_t brcmf_netdev_start_xmit(struct sk_buff *skb,
+ 	brcmf_dbg(DATA, "Enter, bsscfgidx=%d\n", ifp->bsscfgidx);
+ 
+ 	/* Can the device send data? */
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	if (drvr->bus_if->state != BRCMF_BUS_UP ||
++	    brcmf_android_in_reset(drvr)) {
++#else
+ 	if (drvr->bus_if->state != BRCMF_BUS_UP) {
++#endif
+ 		bphy_err(drvr, "xmit rejected state=%d\n", drvr->bus_if->state);
+ 		netif_stop_queue(ndev);
+ 		dev_kfree_skb(skb);
+@@ -2293,6 +2298,7 @@ void brcmf_wake_dev_reset_waitq(struct brcmf_pub *drvr, int status)
+ 	struct brcmf_if *ifp = drvr->iflist[0];
+ 
+ 	drvr->android->reset_status = status;
++	brcmf_android_set_reset(drvr, false);
+ 	/* wake up device reset wait queue */
+ 	if (waitqueue_active(&ifp->pend_dev_reset_wait)) {
+ 		brcmf_dbg(INFO, "device reset is done, wake up pending task\n");
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+index 6386148866da..3adf205942e4 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+@@ -332,6 +332,7 @@ struct rte_console {
+ #define MAX_KSO_ATTEMPTS (PMU_MAX_TRANSITION_DLY/KSO_WAIT_US)
+ #define BRCMF_SDIO_MAX_ACCESS_ERRORS	20
+ 
++static void brcmf_sdio_bus_watchdog(struct brcmf_sdio *bus);
+ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
+ 					 struct brcmf_fw_request *fwreq);
+ static struct brcmf_fw_request *
+@@ -1117,6 +1118,7 @@ static u32 brcmf_sdio_hostmail(struct brcmf_sdio *bus, u32 *hmbd)
+ 	u32 hmb_data;
+ 	u8 fcbits;
+ 	int ret;
++	int orig_msglevel;
+ 
+ 	brcmf_dbg(SDIO, "Enter\n");
+ 
+@@ -1134,6 +1136,10 @@ static u32 brcmf_sdio_hostmail(struct brcmf_sdio *bus, u32 *hmbd)
+ 	/* dongle indicates the firmware has halted/crashed */
+ 	if (hmb_data & HMB_DATA_FWHALT) {
+ 		brcmf_dbg(SDIO, "mailbox indicates firmware halted\n");
++		orig_msglevel = brcmf_msg_level;
++		brcmf_msg_level |= BRCMF_FWCON_VAL;
++		brcmf_sdio_bus_watchdog(bus);
++		brcmf_msg_level = orig_msglevel;
+ 		brcmf_fw_crashed(&sdiod->func1->dev);
+ 	}
+ 
+-- 
+2.25.0
+

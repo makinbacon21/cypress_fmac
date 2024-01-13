@@ -1,0 +1,363 @@
+From 9fb28156a8ae75f0206ecef4b58f9637754f699b Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Wed, 8 Jul 2020 01:28:07 -0500
+Subject: [PATCH 1/2] Add Cypress wifi chip support in Android 10.0.0-2.0.0
+
+The patch includes following changes.
+
+1. Add wlreg_on and OOB GPIO settings.
+2. Set I2C2 pin as WLAN HW OOB interrupt pin.
+3. Disable I2C2 and PCIE0(4356).
+4. Modify defconfig to support FMAC backports modules.
+5. Enable DEBUG FS in kernel config.
+6. Add wifi_card_detect function in MMC drivers.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ arch/arm64/boot/dts/freescale/imx8mq-evk.dts | 60 ++++++++++++++------
+ arch/arm64/configs/imx_v8_android_defconfig  | 17 +++---
+ drivers/mmc/core/core.c                      |  8 ++-
+ drivers/mmc/core/host.c                      |  2 +
+ drivers/mmc/core/sdio.c                      | 21 ++++++-
+ drivers/mmc/host/sdhci-esdhc-imx.c           | 19 +++++++
+ drivers/mmc/host/sdhci.c                     |  3 +-
+ drivers/mmc/host/sdhci.h                     |  2 +
+ include/linux/mmc/host.h                     |  1 +
+ include/linux/mmc/sdio.h                     |  4 ++
+ 10 files changed, 108 insertions(+), 29 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/freescale/imx8mq-evk.dts b/arch/arm64/boot/dts/freescale/imx8mq-evk.dts
+index 21a425a57825..a56590d9e511 100755
+--- a/arch/arm64/boot/dts/freescale/imx8mq-evk.dts
++++ b/arch/arm64/boot/dts/freescale/imx8mq-evk.dts
+@@ -142,6 +142,21 @@
+ 		};
+ 	};
+ 
++	brcmfmac: brcmfmac@0 {
++		compatible = "brcm,android-fmac";
++		wlreg_on-supply = <&wlreg_on>;
++	};
++
++	wlreg_on: fixedregulator@100 {
++		  compatible = "regulator-fixed";
++		  regulator-min-microvolt = <3300000>;
++		  regulator-max-microvolt = <3300000>;
++		  regulator-name = "wlreg_on";
++		  gpio = <&gpio2 19 GPIO_ACTIVE_HIGH>;
++		  off-on-delay = <20000>;
++		  enable-active-high;
++	  };
++/*
+ 	reg_usdhc2_vmmc: regulator-vsd-3v3 {
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&pinctrl_reg_usdhc2>;
+@@ -153,7 +168,7 @@
+ 		off-on-delay-us = <20000>;
+ 		enable-active-high;
+ 	};
+-
++*/
+ 	buck2_reg: regulator-buck2 {
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&pinctrl_buck2>;
+@@ -645,8 +660,7 @@
+ &i2c2 {
+ 	clock-frequency = <100000>;
+ 	pinctrl-names = "default";
+-	pinctrl-0 = <&pinctrl_i2c2>;
+-	status = "okay";
++	status = "disabled";
+ 
+ 	ov5640_mipi: ov5640_mipi@3c {
+ 		compatible = "ovti,ov5640_mipi";
+@@ -672,16 +686,7 @@
+ };
+ 
+ &pcie0 {
+-	pinctrl-names = "default";
+-	pinctrl-0 = <&pinctrl_pcie0>;
+-	reset-gpio = <&gpio5 28 GPIO_ACTIVE_LOW>;
+-	clocks = <&clk IMX8MQ_CLK_PCIE1_ROOT>,
+-		 <&clk IMX8MQ_CLK_PCIE1_AUX>,
+-		 <&clk IMX8MQ_CLK_PCIE1_PHY>,
+-		 <&pcie0_refclk>;
+-	clock-names = "pcie", "pcie_aux", "pcie_phy", "pcie_bus";
+-	hard-wired = <1>;
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ &pcie1 {
+@@ -788,13 +793,26 @@
+ };
+ 
+ &usdhc2 {
++	#address-cells = <1>;
++	#size-cells = <0>;
+ 	pinctrl-names = "default", "state_100mhz", "state_200mhz";
+-	pinctrl-0 = <&pinctrl_usdhc2>;
+-	pinctrl-1 = <&pinctrl_usdhc2_100mhz>;
+-	pinctrl-2 = <&pinctrl_usdhc2_200mhz>;
++	pinctrl-0 = <&pinctrl_usdhc2>, <&pinctrl_usdhc2_gpio>;
++	pinctrl-1 = <&pinctrl_usdhc2_100mhz>, <&pinctrl_usdhc2_gpio>;
++	pinctrl-2 = <&pinctrl_usdhc2_200mhz>, <&pinctrl_usdhc2_gpio>;
++	bus-width = <4>;
++	wifi-host;
++	keep-power-in-suspend;
++	pm-ignore-notify;
+ 	cd-gpios = <&gpio2 12 GPIO_ACTIVE_LOW>;
+-	vmmc-supply = <&reg_usdhc2_vmmc>;
++	cd-post;
+ 	status = "okay";
++	brcmf: bcrmf@1 {
++	       reg = <1>;
++	       compatible = "brcm,bcm4329-fmac";
++	       interrupt-parent = <&gpio5>;
++	       interrupts = <16 IRQ_TYPE_LEVEL_HIGH>;
++	       interrupt-names = "host-wake";
++	};
+ };
+ 
+ &wdog1 {
+@@ -1082,6 +1100,14 @@
+ 		>;
+ 	};
+ 
++	pinctrl_usdhc2_gpio: usdhc2grpgpio {
++		fsl,pins = <
++			MX8MQ_IOMUXC_SD2_CD_B_GPIO2_IO12        0x41
++			MX8MQ_IOMUXC_SD2_RESET_B_GPIO2_IO19     0x41
++			MX8MQ_IOMUXC_I2C2_SCL_GPIO5_IO16        0x19
++		>;
++	};
++
+ 	pinctrl_usdhc2: usdhc2grp {
+ 		fsl,pins = <
+ 			MX8MQ_IOMUXC_SD2_CLK_USDHC2_CLK			0x83
+diff --git a/arch/arm64/configs/imx_v8_android_defconfig b/arch/arm64/configs/imx_v8_android_defconfig
+index c28e8fae8dbe..57f9c169e067 100644
+--- a/arch/arm64/configs/imx_v8_android_defconfig
++++ b/arch/arm64/configs/imx_v8_android_defconfig
+@@ -250,10 +250,10 @@ CONFIG_BT_HCIUART_3WIRE=y
+ CONFIG_BT_HCIUART_BCM=y
+ CONFIG_BT_HCIUART_QCA=y
+ CONFIG_BT_HCIVHCI=y
+-CONFIG_CFG80211=y
+-CONFIG_NL80211_TESTMODE=y
+-CONFIG_CFG80211_WEXT=y
+-CONFIG_MAC80211=y
++CONFIG_CFG80211=n
++CONFIG_NL80211_TESTMODE=n
++CONFIG_CFG80211_WEXT=n
++CONFIG_MAC80211=n
+ CONFIG_MAC80211_LEDS=y
+ CONFIG_RFKILL=y
+ CONFIG_RFKILL_INPUT=y
+@@ -413,14 +413,14 @@ CONFIG_USB_NET_SMSC75XX=m
+ CONFIG_USB_NET_SMSC95XX=m
+ CONFIG_USB_NET_PLUSB=m
+ CONFIG_USB_NET_MCS7830=m
+-CONFIG_BRCMFMAC=m
++CONFIG_BRCMFMAC=n
+ CONFIG_BRCMFMAC_PCIE=y
+ CONFIG_HOSTAP=y
+ CONFIG_WL18XX=m
+ CONFIG_WLCORE_SDIO=m
+-CONFIG_QCA_CLD_WLAN=m
+-CONFIG_CLD_HL_SDIO_CORE=y
+-CONFIG_QCACLD_WLAN_LFR3=y
++CONFIG_QCA_CLD_WLAN=n
++CONFIG_CLD_HL_SDIO_CORE=n
++CONFIG_QCACLD_WLAN_LFR3=n
+ CONFIG_PRIMA_WLAN_OKC=y
+ CONFIG_PRIMA_WLAN_11AC_HIGH_TP=y
+ CONFIG_WLAN_FEATURE_11W=y
+@@ -994,6 +994,7 @@ CONFIG_INDIRECT_PIO=y
+ CONFIG_CMA_SIZE_MBYTES=320
+ CONFIG_PRINTK_TIME=y
+ CONFIG_DEBUG_INFO=y
++CONFIG_DEBUG_FS=y
+ CONFIG_MAGIC_SYSRQ=y
+ CONFIG_PANIC_TIMEOUT=5
+ CONFIG_SCHEDSTATS=y
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index 1e12131fb0b3..3949eadbb650 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -1171,7 +1171,10 @@ int mmc_set_signal_voltage(struct mmc_host *host, int signal_voltage)
+ void mmc_set_initial_signal_voltage(struct mmc_host *host)
+ {
+ 	/* Try to set signal voltage to 3.3V but fall back to 1.8v or 1.2v */
+-	if (!mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_330))
++	if (host->index == 1) {
++		mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180);
++		dev_err(mmc_dev(host), "mmc_power_up: Setting 1.8V\n");
++	} else if (!mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_330))
+ 		dev_dbg(mmc_dev(host), "Initial signal voltage of 3.3v\n");
+ 	else if (!mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180))
+ 		dev_dbg(mmc_dev(host), "Initial signal voltage of 1.8v\n");
+@@ -2361,7 +2364,8 @@ void mmc_start_host(struct mmc_host *host)
+ 	}
+ 
+ 	mmc_gpiod_request_cd_irq(host);
+-	_mmc_detect_change(host, 0, false);
++	if (!(host->caps2 & MMC_CAP2_CD_POST))
++		_mmc_detect_change(host, 0, false);
+ }
+ 
+ void mmc_stop_host(struct mmc_host *host)
+diff --git a/drivers/mmc/core/host.c b/drivers/mmc/core/host.c
+index 114926d214e1..db5aa41de4bc 100644
+--- a/drivers/mmc/core/host.c
++++ b/drivers/mmc/core/host.c
+@@ -221,6 +221,8 @@ int mmc_of_parse(struct mmc_host *host)
+ 	/* Parse Card Detection */
+ 	if (device_property_read_bool(dev, "non-removable")) {
+ 		host->caps |= MMC_CAP_NONREMOVABLE;
++		if (device_property_read_bool(dev, "cd-post"))
++			host->caps2 |= MMC_CAP2_CD_POST;
+ 	} else {
+ 		cd_cap_invert = device_property_read_bool(dev, "cd-inverted");
+ 
+diff --git a/drivers/mmc/core/sdio.c b/drivers/mmc/core/sdio.c
+index 26cabd53ddc5..e85787625f24 100644
+--- a/drivers/mmc/core/sdio.c
++++ b/drivers/mmc/core/sdio.c
+@@ -644,7 +644,13 @@ try_again:
+ 	 * to make sure which speed mode should work.
+ 	 */
+ 	if (rocr & ocr & R4_18V_PRESENT) {
+-		err = mmc_set_uhs_voltage(host, ocr_card);
++		if (host->index == 1) {
++			pr_err("Skipping 1.8V setting for Index: %d\n",
++			       host->index);
++			err = 0;
++		} else {
++			err = mmc_set_uhs_voltage(host, ocr_card);
++		}
+ 		if (err == -EAGAIN) {
+ 			mmc_sdio_resend_if_cond(host, card);
+ 			retries--;
+@@ -861,9 +867,22 @@ static void mmc_sdio_remove(struct mmc_host *host)
+ 	}
+ 
+ 	mmc_remove_card(host->card);
++	/* clear rescan_entered in case force remove */
++	host->rescan_entered = 0;
+ 	host->card = NULL;
+ }
+ 
++void mmc_sdio_force_remove(struct mmc_host *host)
++{
++	mmc_sdio_remove(host);
++
++	mmc_claim_host(host);
++	mmc_detach_bus(host);
++	mmc_power_off(host);
++	mmc_release_host(host);
++}
++EXPORT_SYMBOL_GPL(mmc_sdio_force_remove);
++
+ /*
+  * Card detection - card is alive.
+  */
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index e93585f4d135..d4fbcdec1b35 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -169,6 +169,19 @@
+ /* need request bus freq during low power */
+ #define ESDHC_FLAG_BUSFREQ		BIT(16)
+ 
++static struct mmc_host *wifi_mmc_host;
++void wifi_card_detect(bool on)
++{
++	WARN_ON(!wifi_mmc_host);
++	if (on) {
++		mmc_detect_change(wifi_mmc_host, 0);
++	} else {
++		if (wifi_mmc_host->card)
++			mmc_sdio_force_remove(wifi_mmc_host);
++	}
++}
++EXPORT_SYMBOL(wifi_card_detect);
++
+ struct esdhc_soc_data {
+ 	u32 flags;
+ };
+@@ -1427,6 +1440,12 @@ sdhci_esdhc_imx_probe_dt(struct platform_device *pdev,
+ 	if (mmc_gpio_get_cd(host->mmc) >= 0)
+ 		host->quirks &= ~SDHCI_QUIRK_BROKEN_CARD_DETECTION;
+ 
++	if (of_get_property(np, "wifi-host", NULL)) {
++		wifi_mmc_host = host->mmc;
++		host->quirks2 |= SDHCI_QUIRK2_SDIO_IRQ_THREAD;
++		dev_dbg(mmc_dev(host->mmc), "assigned as wifi host\n");
++	}
++
+ 	return 0;
+ }
+ #else
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index 5c2d67367d0b..a8b5be6786f7 100644
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -3959,7 +3959,8 @@ int sdhci_setup_host(struct sdhci_host *host)
+ 		mmc->max_busy_timeout = 0;
+ 
+ 	mmc->caps |= MMC_CAP_SDIO_IRQ | MMC_CAP_ERASE | MMC_CAP_CMD23;
+-	mmc->caps2 |= MMC_CAP2_SDIO_IRQ_NOTHREAD;
++	if (!(host->quirks2 & SDHCI_QUIRK2_SDIO_IRQ_THREAD))
++		mmc->caps2 |= MMC_CAP2_SDIO_IRQ_NOTHREAD;
+ 
+ 	if (host->quirks & SDHCI_QUIRK_MULTIBLOCK_READ_ACMD12)
+ 		host->flags |= SDHCI_AUTO_CMD12;
+diff --git a/drivers/mmc/host/sdhci.h b/drivers/mmc/host/sdhci.h
+index 61018e7fb0b6..0f224e6962ce 100644
+--- a/drivers/mmc/host/sdhci.h
++++ b/drivers/mmc/host/sdhci.h
+@@ -482,6 +482,8 @@ struct sdhci_host {
+  * block count.
+  */
+ #define SDHCI_QUIRK2_USE_32BIT_BLK_CNT			(1<<18)
++/* Host or Card can't support no thread sdio irq */
++#define SDHCI_QUIRK2_SDIO_IRQ_THREAD			(1<<19)
+ 
+ 	int irq;		/* Device IRQ */
+ 	void __iomem *ioaddr;	/* Mapped address */
+diff --git a/include/linux/mmc/host.h b/include/linux/mmc/host.h
+index ba703384bea0..4ad8cb10c939 100644
+--- a/include/linux/mmc/host.h
++++ b/include/linux/mmc/host.h
+@@ -369,6 +369,7 @@ struct mmc_host {
+ #define MMC_CAP2_CQE_DCMD	(1 << 24)	/* CQE can issue a direct command */
+ #define MMC_CAP2_AVOID_3_3V	(1 << 25)	/* Host must negotiate down from 3.3V */
+ #define MMC_CAP2_MERGE_CAPABLE	(1 << 26)	/* Host can merge a segment over the segment size */
++#define MMC_CAP2_CD_POST	(1 << 27)	/* post card rescan, let client driver to start */
+ 
+ 	int			fixed_drv_type;	/* fixed driver type for non-removable media */
+ 
+diff --git a/include/linux/mmc/sdio.h b/include/linux/mmc/sdio.h
+index e28769991e82..3f1e186e6817 100644
+--- a/include/linux/mmc/sdio.h
++++ b/include/linux/mmc/sdio.h
+@@ -8,6 +8,8 @@
+ #ifndef LINUX_MMC_SDIO_H
+ #define LINUX_MMC_SDIO_H
+ 
++#include <linux/mmc/host.h>
++
+ /* SDIO commands                         type  argument     response */
+ #define SD_IO_SEND_OP_COND          5 /* bcr  [23:0] OCR         R4  */
+ #define SD_IO_RW_DIRECT            52 /* ac   [31:0] See below   R5  */
+@@ -186,4 +188,6 @@
+ 
+ #define SDIO_FBR_BLKSIZE	0x10	/* block size (2 bytes) */
+ 
++void mmc_sdio_force_remove(struct mmc_host *host);
++
+ #endif /* LINUX_MMC_SDIO_H */
+-- 
+2.25.0
+

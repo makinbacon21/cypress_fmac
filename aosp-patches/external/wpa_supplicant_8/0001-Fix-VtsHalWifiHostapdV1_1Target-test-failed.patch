@@ -1,0 +1,77 @@
+From 82cd996f4895b908c2784d9df2c593c9fdea60ab Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Thu, 11 Jun 2020 02:31:16 -0500
+Subject: [PATCH 1/5] Fix VtsHalWifiHostapdV1_1Target test failed
+
+We got 8 test cases in VTS VtsHalWifiHostapdV1_1Target.
+Because we don't support ACS offload, we disable QCA configration and use
+ACS feature in hostap daemon. Besides, we set band to 2g mode as default
+if user set HWMODE=any in upper layer.
+
+[VTS Failed Cases]
+VtsHalWifiHostapdV1_1Target#HostapdHidlTest.AddPskAccessPointWithAcs
+VtsHalWifiHostapdV1_1Target#HostapdHidlTest.AddPskAccessPointWithAcsAndChannelRange
+VtsHalWifiHostapdV1_1Target#HostapdHidlTest.AddOpenAccessPointWithAcs
+VtsHalWifiHostapdV1_1Target#HostapdHidlTest.RemoveAccessPointWithAcs
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ hostapd/android.config       | 2 +-
+ hostapd/hidl/1.1/hostapd.cpp | 2 +-
+ src/ap/acs.c                 | 6 +++++-
+ 3 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/hostapd/android.config b/hostapd/android.config
+index 4502a609..56bcb7f0 100644
+--- a/hostapd/android.config
++++ b/hostapd/android.config
+@@ -26,7 +26,7 @@
+ CONFIG_LIBNL20=y
+ 
+ # QCA vendor extensions to nl80211
+-CONFIG_DRIVER_NL80211_QCA=y
++#CONFIG_DRIVER_NL80211_QCA=y
+ 
+ # Driver interface for FreeBSD net80211 layer (e.g., Atheros driver)
+ #CONFIG_DRIVER_BSD=y
+diff --git a/hostapd/hidl/1.1/hostapd.cpp b/hostapd/hidl/1.1/hostapd.cpp
+index 02985370..182b5b2f 100644
+--- a/hostapd/hidl/1.1/hostapd.cpp
++++ b/hostapd/hidl/1.1/hostapd.cpp
+@@ -164,7 +164,7 @@ std::string CreateHostapdConfig(
+ 		}
+ 		break;
+ 	case IHostapd::Band::BAND_ANY:
+-		hw_mode_as_string = "hw_mode=any";
++		hw_mode_as_string = "hw_mode=g";
+ 		if (iface_params.V1_0.channelParams.enableAcs) {
+ 			ht_cap_vht_oper_chwidth_as_string =
+ 			    "ht_capab=[HT40+]\n"
+diff --git a/src/ap/acs.c b/src/ap/acs.c
+index 3b450757..574f1785 100644
+--- a/src/ap/acs.c
++++ b/src/ap/acs.c
+@@ -921,7 +921,7 @@ static int acs_request_scan(struct hostapd_iface *iface)
+ {
+ 	struct wpa_driver_scan_params params;
+ 	struct hostapd_channel_data *chan;
+-	int i, *freq;
++	int i, *freq, cnt = 0;
+ 
+ 	os_memset(&params, 0, sizeof(params));
+ 	params.freqs = os_calloc(iface->current_mode->num_channels + 1,
+@@ -939,7 +939,11 @@ static int acs_request_scan(struct hostapd_iface *iface)
+ 			continue;
+ 
+ 		*freq++ = chan->freq;
++		cnt++;
+ 	}
++	if (!cnt)
++		return -1;
++
+ 	*freq = 0;
+ 
+ 	iface->scan_cb = acs_scan_complete;
+-- 
+2.25.0
+

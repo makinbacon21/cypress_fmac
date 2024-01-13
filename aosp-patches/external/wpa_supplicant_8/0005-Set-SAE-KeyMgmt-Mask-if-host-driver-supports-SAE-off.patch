@@ -1,0 +1,31 @@
+From 91177d32048dc4b04441a1846bb280d704b3faad Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Thu, 11 Jun 2020 02:47:46 -0500
+Subject: [PATCH 5/5] Set SAE KeyMgmt Mask if host driver supports SAE offload
+ feature
+
+We set SAE KeyMgmt mask if Cypress firmware and host driver support
+SAE offload feature in HAL
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+---
+ wpa_supplicant/hidl/1.2/sta_iface.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/wpa_supplicant/hidl/1.2/sta_iface.cpp b/wpa_supplicant/hidl/1.2/sta_iface.cpp
+index 1ca440e0..1a5cfe90 100644
+--- a/wpa_supplicant/hidl/1.2/sta_iface.cpp
++++ b/wpa_supplicant/hidl/1.2/sta_iface.cpp
+@@ -1119,7 +1119,8 @@ StaIface::getKeyMgmtCapabilitiesInternal()
+ 	}
+ #endif /* CONFIG_OWE */
+ #ifdef CONFIG_SAE
+-	if (wpa_s->drv_flags & WPA_DRIVER_FLAGS_SAE) {
++	if (wpa_s->drv_flags & WPA_DRIVER_FLAGS_SAE ||
++	    wpa_s->drv_flags & WPA_DRIVER_FLAGS_SAE_OFFLOAD) {
+ 		mask |= ISupplicantStaNetwork::KeyMgmtMask::SAE;
+ 	}
+ #endif /* CONFIG_SAE */
+-- 
+2.25.0
+

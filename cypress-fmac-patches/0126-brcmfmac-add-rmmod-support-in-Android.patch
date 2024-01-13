@@ -1,0 +1,372 @@
+From 93aaf07cac0ab66aa01114eedb6efa12f9ab2743 Mon Sep 17 00:00:00 2001
+From: Wright Feng <wright.feng@cypress.com>
+Date: Mon, 27 Jul 2020 03:12:17 -0500
+Subject: [PATCH 126/130] brcmfmac: add rmmod support in Android
+
+Typical Android platform doesn't have wifi driver rmmod use case.
+In customized products, rmmod may be used for memory saving or other
+purposes. Therefore, we enable the rmmod support by removing wlan0
+interface, unregistering wiphy and freeing all memory structures
+upon "rmmod brcmfmac" command.
+
+Signed-off-by: Wright Feng <wright.feng@cypress.com>
+
+---
+ .../broadcom/brcm80211/brcmfmac/android.h     |  1 +
+ .../broadcom/brcm80211/brcmfmac/btcoex.c      |  3 ++
+ .../broadcom/brcm80211/brcmfmac/cfg80211.c    | 37 +++++++++++++------
+ .../broadcom/brcm80211/brcmfmac/common.c      | 10 +++--
+ .../broadcom/brcm80211/brcmfmac/core.c        | 29 +++++++++++----
+ .../broadcom/brcm80211/brcmfmac/firmware.c    |  2 +-
+ .../broadcom/brcm80211/brcmfmac/p2p.c         |  7 +---
+ .../broadcom/brcm80211/brcmfmac/pcie.c        |  4 +-
+ .../broadcom/brcm80211/brcmfmac/proto.h       |  2 +-
+ .../broadcom/brcm80211/brcmfmac/sdio.c        | 14 +------
+ .../broadcom/brcm80211/brcmfmac/sdio.h        |  1 +
+ 11 files changed, 65 insertions(+), 45 deletions(-)
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+index 961aae4e0c24..8752ad22ae29 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/android.h
+@@ -67,6 +67,7 @@ struct brcmf_android {
+ 	bool wifi_reset;
+ 	bool wifi_on;
+ 	bool init_done;
++	bool deinit;
+ 	char country[3];
+ 	bool wakelock_waive;
+ 	struct wakeup_source wakelock;
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/btcoex.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/btcoex.c
+index ec2bec0999d1..6d56f2718526 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/btcoex.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/btcoex.c
+@@ -455,6 +455,9 @@ int brcmf_btcoex_set_mode(struct brcmf_cfg80211_vif *vif,
+ 	struct brcmf_btcoex_info *btci = cfg->btcoex;
+ 	struct brcmf_if *ifp = brcmf_get_ifp(cfg->pub, 0);
+ 
++	if (!btci)
++		return -EIO;
++
+ 	switch (mode) {
+ 	case BRCMF_BTCOEX_DISABLED:
+ 		brcmf_dbg(INFO, "DHCP session starts\n");
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+index 400c81ad4476..f181fa247a45 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -160,6 +160,14 @@ static struct ieee80211_channel __wl_5ghz_channels[] = {
+ 	CHAN5G(153), CHAN5G(157), CHAN5G(161), CHAN5G(165)
+ };
+ 
++static struct ieee80211_supported_band brcmf_def_band_2ghz = {
++	.band = NL80211_BAND_2GHZ,
++	.channels = __wl_2ghz_channels,
++	.n_channels = ARRAY_SIZE(__wl_2ghz_channels),
++	.bitrates = wl_g_rates,
++	.n_bitrates = wl_g_rates_size
++};
++
+ /* Band templates duplicated per wiphy. The channel info
+  * above is added to the band during setup.
+  */
+@@ -2278,6 +2286,11 @@ brcmf_cfg80211_get_tx_power(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 	if (!check_vif_up(vif))
+ 		return -EIO;
+ 
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	if (brcmf_android_in_reset(cfg->pub))
++		return -EIO;
++#endif
++
+ 	err = brcmf_fil_iovar_int_get(vif->ifp, "qtxpower", &qdbm);
+ 	if (err) {
+ 		bphy_err(drvr, "error (%d)\n", err);
+@@ -6551,6 +6564,7 @@ static void wl_deinit_priv(struct brcmf_cfg80211_info *cfg)
+ 	cfg->dongle_up = false;	/* dongle down */
+ 	brcmf_abort_scanning(cfg);
+ 	brcmf_deinit_priv_mem(cfg);
++	brcmf_clear_assoc_ies(cfg);
+ }
+ 
+ static void init_vif_event(struct brcmf_cfg80211_vif_event *event)
+@@ -7939,9 +7953,10 @@ static void brcmf_free_wiphy(struct wiphy *wiphy)
+ 	if (wiphy->iface_combinations) {
+ 		for (i = 0; i < wiphy->n_iface_combinations; i++)
+ 			kfree(wiphy->iface_combinations[i].limits);
++		kfree(wiphy->iface_combinations);
+ 	}
+-	kfree(wiphy->iface_combinations);
+-	if (wiphy->bands[NL80211_BAND_2GHZ]) {
++	if (wiphy->bands[NL80211_BAND_2GHZ] &&
++	    wiphy->bands[NL80211_BAND_2GHZ] != &brcmf_def_band_2ghz) {
+ 		kfree(wiphy->bands[NL80211_BAND_2GHZ]->channels);
+ 		kfree(wiphy->bands[NL80211_BAND_2GHZ]);
+ 	}
+@@ -8150,8 +8165,14 @@ void brcmf_cfg80211_detach(struct brcmf_cfg80211_info *cfg)
+ 	brcmf_pno_detach(cfg);
+ 	brcmf_btcoex_detach(cfg);
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-	brcmf_dbg(INFO, "not unregister wiphy and cfg->ops\n");
+-	wl_deinit_priv(cfg);
++	if (cfg->pub->android->deinit) {
++		set_wiphy_dev(cfg->wiphy, NULL);
++		wiphy_unregister(cfg->wiphy);
++		brcmf_free_wiphy(cfg->wiphy);
++		kfree(cfg);
++	} else {
++		wl_deinit_priv(cfg);
++	}
+ #else
+ 	wiphy_unregister(cfg->wiphy);
+ 	wl_deinit_priv(cfg);
+@@ -8194,14 +8215,6 @@ int brcmf_crit_proto_stop(struct net_device *ndev)
+ }
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-static struct ieee80211_supported_band brcmf_def_band_2ghz = {
+-	.band = NL80211_BAND_2GHZ,
+-	.channels = __wl_2ghz_channels,
+-	.n_channels = ARRAY_SIZE(__wl_2ghz_channels),
+-	.bitrates = wl_g_rates,
+-	.n_bitrates = wl_g_rates_size
+-};
+-
+ struct brcmf_if *brcmf_cfg80211_register_if(struct device *dev,
+ 					    struct brcmf_mp_device *settings)
+ {
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+index a08616c3e04c..c2012b55a20d 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+@@ -381,6 +381,7 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
+ 
+ 		err = brcmf_fil_iovar_data_set(ifp, "event_msgs_ext",
+ 					       eventmask_msg, msglen);
++		kfree(eventmask_msg);
+ 		if (err) {
+ 			brcmf_err("Set event_msgs_ext error (%d)\n", err);
+ 			goto done;
+@@ -586,10 +587,12 @@ static int brcmf_common_pd_remove(struct platform_device *pdev)
+ 	if (brcmfmac_pdata && brcmfmac_pdata->power_off) {
+ 		brcmfmac_pdata->power_off();
+ 	} else if (wifi_regulator) {
+-		regulator_disable(wifi_regulator);
++		if (regulator_is_enabled(wifi_regulator)) {
++			regulator_disable(wifi_regulator);
+ #if defined(CONFIG_BRCMFMAC_SDIO) && defined(CONFIG_BRCMFMAC_CARD_DETECT)
+-		wifi_card_detect(false);
++			wifi_card_detect(false);
+ #endif
++		}
+ 		regulator_put(wifi_regulator);
+ 		wifi_regulator = NULL;
+ 	}
+@@ -655,13 +658,14 @@ static int __init brcmfmac_module_init(void)
+ 
+ static void __exit brcmfmac_module_exit(void)
+ {
+-	brcmf_core_exit();
++	//brcmf_core_exit();
+ 	if (brcmfmac_pdata)
+ 		platform_driver_unregister(&brcmf_pd);
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+ 	if (wifi_regulator)
+ 		platform_driver_unregister(&brcmf_platform_dev_driver);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
++	brcmf_core_exit();
+ }
+ 
+ module_init(brcmfmac_module_init);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+index 831db9364973..69cdc98ca97c 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/core.c
+@@ -949,15 +949,15 @@ static void brcmf_del_if(struct brcmf_pub *drvr, s32 bsscfgidx,
+ 	ifidx = ifp->ifidx;
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-	if (ifp->bsscfgidx == 0) {
++	if (ifp->bsscfgidx == 0 && !ifp->drvr->android->deinit) {
+ 		brcmf_dbg(INFO, "skip removing primary interface\n");
+ 		return;
+ 	}
+ #endif
+-
+ 	if (ifp->ndev) {
+ 		if (bsscfgidx == 0) {
+-			if (ifp->ndev->netdev_ops == &brcmf_netdev_ops_pri) {
++			if (ifp->ndev->netdev_ops == &brcmf_netdev_ops_pri &&
++			    drvr->android->wifi_on) {
+ 				rtnl_lock();
+ 				brcmf_netdev_stop(ifp->ndev);
+ 				rtnl_unlock();
+@@ -998,7 +998,7 @@ void brcmf_remove_interface(struct brcmf_if *ifp, bool rtnl_locked)
+ 	drvr = ifp->drvr;
+ 
+ #ifdef CONFIG_BRCMFMAC_ANDROID
+-	if (ifp->bsscfgidx == 0)
++	if (ifp->bsscfgidx == 0 && !ifp->drvr->android->deinit)
+ 		return;
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+@@ -1530,9 +1530,6 @@ void brcmf_detach(struct device *dev)
+ 		brcmf_proto_detach(drvr);
+ 	}
+ #else
+-#if defined(CONFIG_BRCMFMAC_ANDROID)
+-	brcmf_android_detach(drvr);
+-#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+ 	bus_if->drvr = NULL;
+ 	kfree(drvr);
+ #endif
+@@ -1654,6 +1651,7 @@ int __init brcmf_core_init(void)
+ 
+ void __exit brcmf_core_exit(void)
+ {
++	brcmf_dbg(INFO, "start removing module\n");
+ 	cancel_work_sync(&brcmf_driver_work);
+ 
+ #ifdef CONFIG_BRCMFMAC_SDIO
+@@ -1663,8 +1661,21 @@ void __exit brcmf_core_exit(void)
+ 	brcmf_usb_exit();
+ #endif
+ #ifdef CONFIG_BRCMFMAC_PCIE
++#ifndef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_pcie_exit();
+ #endif
++#endif
++#ifdef CONFIG_BRCMFMAC_ANDROID
++	if (!g_drvr)
++		return;
++
++	g_drvr->android->deinit = true;
++	brcmf_remove_interface(g_drvr->iflist[0], false);
++	brcmf_cfg80211_detach(g_drvr->config);
++	kfree(g_drvr->ops);
++	wiphy_free(g_drvr->wiphy);
++	brcmf_android_detach(g_drvr);
++#endif /* CONFIG_BRCMFMAC_ANDROID */
+ }
+ 
+ int
+@@ -2179,6 +2190,10 @@ int brcmf_android_netdev_stop(struct net_device *ndev)
+ 	int ret;
+ 
+ 	brcmf_dbg(INFO, "Stopping IF:%s\n", ndev->name);
++
++	if (!drvr->android->wifi_on)
++		return 0;
++
+ 	brcmf_android_wake_lock(drvr);
+ 
+ 	ret = brcmf_netdev_stop(ndev);
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
+index c17ea7b31f4f..51fcc8fd8962 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/firmware.c
+@@ -508,7 +508,7 @@ static u8 *brcmf_fw_nvram_from_efi(size_t *data_len_ret)
+ static inline u8 *brcmf_fw_nvram_from_efi(size_t *data_len) { return NULL; }
+ #endif
+ 
+-static void brcmf_fw_free_request(struct brcmf_fw_request *req)
++void brcmf_fw_free_request(struct brcmf_fw_request *req)
+ {
+ 	struct brcmf_fw_item *item;
+ 	int i;
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/p2p.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/p2p.c
+index 1313c7b5c7d0..e33d51b632d9 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/p2p.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/p2p.c
+@@ -2543,12 +2543,7 @@ void brcmf_p2p_detach(struct brcmf_p2p_info *p2p)
+ 	if (vif != NULL) {
+ 		brcmf_p2p_cancel_remain_on_channel(vif->ifp);
+ 		brcmf_p2p_deinit_discovery(p2p);
+-#ifdef CONFIG_BRCMFMAC_ANDROID
+-		/* The rtnl_lock is held already in devinet_ioctl() */
+-		brcmf_remove_interface(vif->ifp, true);
+-#else
+-		brcmf_remove_interface(vif->ifp, false);
+-#endif
++		brcmf_remove_interface(vif->ifp, rtnl_is_locked());
+ 	}
+ 	/* just set it all to zero */
+ 	memset(p2p, 0, sizeof(*p2p));
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+index 68cd00479e6e..a4bdfec8053e 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+@@ -2261,9 +2261,7 @@ brcmf_pcie_remove(struct pci_dev *pdev)
+ 		brcmf_pcie_intr_disable(devinfo);
+ 
+ 	brcmf_detach(&pdev->dev);
+-#ifdef CONFIG_BRCMFMAC_ANDROID
+-    brcmf_dbg(PCIE, "not do brcmf_free\n");
+-#else
++#ifndef CONFIG_BRCMFMAC_ANDROID
+ 	brcmf_free(&pdev->dev);
+ #endif /* CONFIG_BRCMFMAC_ANDROID */
+ 
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/proto.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/proto.h
+index 57495b707b85..cde259f9cffa 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/proto.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/proto.h
+@@ -128,7 +128,7 @@ brcmf_proto_add_if(struct brcmf_pub *drvr, struct brcmf_if *ifp)
+ static inline void
+ brcmf_proto_del_if(struct brcmf_pub *drvr, struct brcmf_if *ifp)
+ {
+-	if (!drvr->proto->del_if)
++	if (!drvr->proto || !drvr->proto->del_if)
+ 		return;
+ 	drvr->proto->del_if(ifp);
+ }
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+index 4566fae91d02..6386148866da 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.c
+@@ -4423,12 +4423,8 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
+ 	if (!brcmf_android_in_reset(drvr)) {
+ 		sdio_claim_host(sdiod->func1);
+ 		sdio_release_host(sdiod->func1);
+-		if (!err) {
+-			code = fwreq->items[BRCMF_SDIO_FW_CODE].binary;
+-			nvram = fwreq->items[BRCMF_SDIO_FW_NVRAM].nv_data.data;
+-			release_firmware(code);
+-			brcmf_fw_nvram_free(nvram);
+-		}
++		if (!err)
++			brcmf_fw_free_request(fwreq);
+ 		brcmf_android_attach(sdiod->dev, sdiod->settings);
+ 		return;
+ 	}
+@@ -4802,15 +4798,9 @@ void brcmf_sdio_remove(struct brcmf_sdio *bus)
+ 			bus->watchdog_tsk = NULL;
+ 		}
+ 
+-#if defined(CONFIG_BRCMFMAC_ANDROID)
+-		brcmf_detach(bus->sdiodev->dev);
+-#endif /* defined(CONFIG_BRCMFMAC_ANDROID) */
+-		/* De-register interrupt handler */
+ 		brcmf_sdiod_intr_unregister(bus->sdiodev);
+ 
+-#if !defined(CONFIG_BRCMFMAC_ANDROID)
+ 		brcmf_detach(bus->sdiodev->dev);
+-#endif /* !defined(CONFIG_BRCMFMAC_ANDROID) */
+ 
+ 		cancel_work_sync(&bus->datawork);
+ 		if (bus->brcmf_wq)
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.h b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.h
+index d008689d0d24..daf295aaad8b 100644
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.h
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/sdio.h
+@@ -410,6 +410,7 @@ void brcmf_sdio_wd_timer(struct brcmf_sdio *bus, bool active);
+ void brcmf_sdio_wowl_config(struct device *dev, bool enabled);
+ int brcmf_sdio_sleep(struct brcmf_sdio *bus, bool sleep);
+ void brcmf_sdio_trigger_dpc(struct brcmf_sdio *bus);
++void brcmf_fw_free_request(struct brcmf_fw_request *req);
+ 
+ /* SHM offsets */
+ #define M_DS1_CTRL_SDIO(ptr)	((ptr).ulp_shm_offset.m_ulp_ctrl_sdio)
+-- 
+2.25.0
+
