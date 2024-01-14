@@ -106,7 +106,7 @@ static int wl_android_setband(struct net_device *ndev, struct wiphy *wiphy,
 		}
 		err = brcmf_fil_cmd_int_set(ifp, BRCMF_C_SET_BAND, band);
 		if (!err) {
-			err = brcmf_setup_wiphybands(wiphy);
+			err = brcmf_setup_wiphybands(wiphy_to_cfg(wiphy));
 			if (!err)
 				wiphy_apply_custom_regulatory(wiphy, &brcmf_regdom);
 			else
@@ -156,7 +156,7 @@ nv_android_private_cmd(struct brcmf_pub *drvr, struct net_device *ndev,
 						(cmd_len - skip), *(command + skip - 2) - '0');
 	} else if (strncmp(command, CMD_UPDATE_CHANNEL_LIST,
 			strlen(CMD_UPDATE_CHANNEL_LIST)) == 0) {
-		brcmf_setup_wiphybands(wiphy);
+		brcmf_setup_wiphybands(wiphy_to_cfg(wiphy));
 	} else if (strncmp(command, CMD_RESTRICT_BW_20, strlen(CMD_RESTRICT_BW_20)) == 0) {
 		*bytes_written = -1;
 		val = *(command + strlen(CMD_RESTRICT_BW_20) + 1) - '0';
