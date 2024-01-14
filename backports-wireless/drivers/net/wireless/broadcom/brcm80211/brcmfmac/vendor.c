@@ -1116,38 +1116,6 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 	{
 		{
 			.vendor_id = GOOGLE_OUI,
-			.subcmd = ANDR_WIFI_RANDOM_MAC_OUI
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_set_pno_mac_oui
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_GET_VER
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_get_ver
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_START_LOGGING
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_TRIGGER_MEM_DUMP
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
 			.subcmd = DEBUG_GET_MEM_DUMP
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
@@ -1156,38 +1124,6 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 	{
 		{
 			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_GET_RING_STATUS
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_GET_RING_DATA
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_GET_FEATURE
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_RESET_LOGGING
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
 			.subcmd = ANDR_WIFI_SUBCMD_TX_PWR_SCENARIO
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
@@ -1205,46 +1141,6 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 		{
 			.vendor_id = GOOGLE_OUI,
 			.subcmd = DEBUG_SET_HAL_PID
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_GET_WAKE_REASON_STATS
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = ANDR_WIFI_SUBCMD_TX_PWR_SCENARIO
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = WIFI_SUBCMD_SET_LATENCY_MODE
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_SET_HAL_PID
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_GET_WAKE_REASON_STATS
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_unsupported_feature
