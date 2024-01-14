@@ -1668,6 +1668,7 @@ brcmf_handle_private_cmd(struct brcmf_pub *drvr, struct net_device *ndev,
 		  command, cmd_len, &bytes_written) > 0) {
 		//Handled NV Private command
 #endif /* CPTCFG_BRCMFMAC_NV_PRIV_CMD */
+#endif /* CPTCFG_BRCMFMAC_ANDROID */
 	} else if (strncasecmp(command, CMD_GETBAND,
 		   strlen(CMD_GETBAND)) == 0) {
 		bytes_written =
