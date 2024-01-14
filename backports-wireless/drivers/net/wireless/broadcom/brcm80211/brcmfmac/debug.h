@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2010 Broadcom Corporation
-<<<<<<< HEAD
-=======
  * Copyright (C) 2019 NVIDIA Corporation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -16,7 +14,6 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
  * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
->>>>>>> 54c9a54 (Enable NvIDS feature in brcmfamc driver)
  */
 
 #ifndef BRCMFMAC_DEBUG_H
@@ -94,7 +91,6 @@ void __brcmf_err(struct brcmf_bus *bus, const char *func, const char *fmt, ...);
 			wiphy_err((drvr)->wiphy, "%s: " fmt, __func__,	\
 				  ##__VA_ARGS__);			\
 	} while (0)
-#endif /*CPTCFG_BRCMFMAC_NV_IDS */
 
 #ifdef CPTCFG_BRCMFMAC_NV_IDS
 #define NV_FILELOG_ON()         (enable_file_logging)
