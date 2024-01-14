@@ -807,8 +807,6 @@ brcmf_privcmd_ampdu_mpdu(struct brcmf_if *ifp, char *command, int total_len)
 		brcmf_err("ampdu_mpdu MAX value is 32.\n");
 		return -1;
 	}
-    /* reset ampdu_mpdu */
-    miracast_off_ampdu_size = -1;
 
 	err = brcmf_fil_iovar_data_set(ifp, "ampdu_mpdu", &ampdu_mpdu,
 				       sizeof(int));
