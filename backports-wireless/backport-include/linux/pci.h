@@ -238,12 +238,23 @@ static inline struct pci_dev *pcie_find_root_port(struct pci_dev *dev)
 
 #if defined(CONFIG_PCI)
 #if LINUX_VERSION_IS_LESS(5,3,0)
+
+#ifndef PCIE_LINK_STATE_L0S
+#define PCIE_LINK_STATE_L0S	1
+#endif
+
+#ifndef PCIE_LINK_STATE_L1
+#define PCIE_LINK_STATE_L1	2
+#endif
+
+extern void __real_pci_disable_link_state(struct pci_dev *pdev, int state);
+
 static inline int
-backport_pci_disable_link_state(struct pci_dev *pdev, int state)
+__wrap_pci_disable_link_state(struct pci_dev *pdev, int state)
 {
 	u16 aspmc;
 
-	pci_disable_link_state(pdev, state);
+	__real_pci_disable_link_state(pdev, state);
 
 	pcie_capability_read_word(pdev, PCI_EXP_LNKCTL, &aspmc);
 	if ((state & PCIE_LINK_STATE_L0S) &&
@@ -254,9 +265,8 @@ backport_pci_disable_link_state(struct pci_dev *pdev, int state)
 	    (aspmc & PCI_EXP_LNKCTL_ASPM_L1))
 		return -EPERM;
 
-	return 0;
+    return 0;
 }
-#define pci_disable_link_state LINUX_BACKPORT(pci_disable_link_state)
 
 #endif /* < 5.3 */
 #endif /* defined(CONFIG_PCI) */
