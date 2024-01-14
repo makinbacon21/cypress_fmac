@@ -241,7 +241,7 @@ static int brcmf_init_nvram_parser(struct nvram_parser *nvp,
  * compressed and "devpath" maps to index for valid entries.
  */
 static void brcmf_fw_strip_multi_v1(struct nvram_parser *nvp, u16 domain_nr,
-				    u16 bus_nr)
+					u16 bus_nr)
 {
 	/* Device path with a leading '=' key-value separator */
 	char pci_path[] = "=pci/?/?";
@@ -278,8 +278,8 @@ static void brcmf_fw_strip_multi_v1(struct nvram_parser *nvp, u16 domain_nr,
 		 * Y = domain_nr, Z = bus_nr, X = virtual ID
 		 */
 		if (strncmp(&nvp->nvram[i], "devpath", 7) == 0 &&
-		    (!strncmp(&nvp->nvram[i + 8], pci_path, pci_len) ||
-		     !strncmp(&nvp->nvram[i + 8], pcie_path, pcie_len))) {
+			(!strncmp(&nvp->nvram[i + 8], pci_path, pci_len) ||
+			 !strncmp(&nvp->nvram[i + 8], pcie_path, pcie_len))) {
 			id = nvp->nvram[i + 7] - '0';
 			found = true;
 			break;
@@ -328,7 +328,7 @@ fail:
  * pcie/domain_nr/bus_nr:
  */
 static void brcmf_fw_strip_multi_v2(struct nvram_parser *nvp, u16 domain_nr,
-				    u16 bus_nr)
+					u16 bus_nr)
 {
 	char prefix[BRCMF_FW_NVRAM_PCIEDEV_LEN];
 	size_t len;
@@ -379,7 +379,7 @@ static void brcmf_fw_add_defaults(struct nvram_parser *nvp)
 		return;
 
 	memcpy(&nvp->nvram[nvp->nvram_len], &BRCMF_FW_DEFAULT_BOARDREV,
-	       strlen(BRCMF_FW_DEFAULT_BOARDREV));
+		   strlen(BRCMF_FW_DEFAULT_BOARDREV));
 	nvp->nvram_len += strlen(BRCMF_FW_DEFAULT_BOARDREV);
 	nvp->nvram[nvp->nvram_len] = '\0';
 	nvp->nvram_len++;
@@ -564,8 +564,8 @@ static int brcmf_fw_request_nvram_done(const struct firmware *fw, void *ctx)
 
 	if (data)
 		nvram = brcmf_fw_nvram_strip(data, data_len, &nvram_length,
-					     fwctx->req->domain_nr,
-					     fwctx->req->bus_nr);
+						 fwctx->req->domain_nr,
+						 fwctx->req->bus_nr);
 
 	if (free_bcm47xx_nvram)
 		bcm47xx_nvram_release_contents(data);
@@ -586,7 +586,7 @@ fail:
 }
 
 static int brcmf_fw_complete_request(const struct firmware *fw,
-				     struct brcmf_fw *fwctx)
+					 struct brcmf_fw *fwctx)
 {
 	struct brcmf_fw_item *cur = &fwctx->req->items[fwctx->curpos];
 	int ret = 0;
@@ -614,7 +614,7 @@ static int brcmf_fw_complete_request(const struct firmware *fw,
 }
 
 static int brcmf_fw_request_firmware(const struct firmware **fw,
-				     struct brcmf_fw *fwctx)
+					 struct brcmf_fw *fwctx)
 {
 	struct brcmf_fw_item *cur = &fwctx->req->items[fwctx->curpos];
 	int ret;
@@ -655,8 +655,8 @@ static void brcmf_fw_request_done(const struct firmware *fw, void *ctx)
 		fwctx->req = NULL;
 	}
 	fwctx->done(fwctx->dev, ret, fwctx->req);
-    if (fw)
-        release_firmware(fw);
+	if (fw)
+		release_firmware(fw);
 
 	kfree(fwctx);
 }
@@ -700,8 +700,8 @@ int brcmf_fw_get_firmwares(struct device *dev, struct brcmf_fw_request *req,
 	fwctx->done = fw_cb;
 
 	ret = request_firmware_nowait(THIS_MODULE, true, first->path,
-				      fwctx->dev, GFP_KERNEL, fwctx,
-				      brcmf_fw_request_done);
+					  fwctx->dev, GFP_KERNEL, fwctx,
+					  brcmf_fw_request_done);
 	if (ret < 0)
 		brcmf_fw_request_done(NULL, fwctx);
 
@@ -710,9 +710,9 @@ int brcmf_fw_get_firmwares(struct device *dev, struct brcmf_fw_request *req,
 
 struct brcmf_fw_request *
 brcmf_fw_alloc_request(u32 chip, u32 chiprev,
-		       const struct brcmf_firmware_mapping mapping_table[],
-		       u32 table_size, struct brcmf_fw_name *fwnames,
-		       u32 n_fwnames)
+			   const struct brcmf_firmware_mapping mapping_table[],
+			   u32 table_size, struct brcmf_fw_name *fwnames,
+			   u32 n_fwnames)
 {
 	struct brcmf_fw_request *fwreq;
 	char chipname[12];
@@ -723,7 +723,7 @@ brcmf_fw_alloc_request(u32 chip, u32 chiprev,
 
 	for (i = 0; i < table_size; i++) {
 		if (mapping_table[i].chipid == chip &&
-		    mapping_table[i].revmask & BIT(chiprev))
+			mapping_table[i].revmask & BIT(chiprev))
 			break;
 	}
 
