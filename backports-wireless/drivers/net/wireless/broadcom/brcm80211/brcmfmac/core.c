@@ -2050,7 +2050,7 @@ brcmf_set_country(struct net_device *ndev, char *country)
 	struct wiphy *wiphy = NULL;
 	struct brcmf_if *ifp = NULL;
 	struct brcmf_fil_country_le ccreq;
-	int err;
+	int err, i;
 
 	brcmf_dbg(TRACE, "set country: %s\n", country);
 
