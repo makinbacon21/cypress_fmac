@@ -1561,6 +1561,7 @@ static void brcmf_link_down(struct brcmf_cfg80211_vif *vif, u16 reason,
 			/* Reset per connection lifetime stats */
 			SET_DRV_STAT(aggr_not_assoc_err, 0);
 #endif
+        }
 	}
 	clear_bit(BRCMF_VIF_STATUS_CONNECTING, &vif->sme_state);
 	clear_bit(BRCMF_SCAN_STATUS_SUPPRESS, &cfg->scan_status);
