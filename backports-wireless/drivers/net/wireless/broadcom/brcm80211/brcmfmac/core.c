@@ -2460,10 +2460,6 @@ int brcmf_set_power(bool on, unsigned long msec)
 		}
 	}
 
-#ifdef CPTCFG_BRCMFMAC_NV_GPIO
-	toggle_gpio(on, msec);
-#endif /* CPTCFG_BRCMFMAC_NV_GPIO */
-
 	return 0;
 }
 
