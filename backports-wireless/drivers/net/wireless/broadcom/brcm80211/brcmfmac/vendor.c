@@ -1280,31 +1280,79 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 #endif /* defined(CPTCFG_BRCMFMAC_ANDROID) */
 };
 
-const struct  nl80211_vendor_cmd_info brcmf_vendor_events[] = {
-		{ BROADCOM_OUI, BRCM_VENDOR_EVENT_UNSPEC },
-		{ BROADCOM_OUI, BRCM_VENDOR_EVENT_PRIV_STR },
-		{ GOOGLE_OUI, GOOGLE_GSCAN_SIGNIFICANT_EVENT },
-		{ GOOGLE_OUI, GOOGLE_GSCAN_GEOFENCE_FOUND_EVENT },
-		{ GOOGLE_OUI, GOOGLE_GSCAN_BATCH_SCAN_EVENT },
-		{ GOOGLE_OUI, GOOGLE_SCAN_FULL_RESULTS_EVENT },
-		{ GOOGLE_OUI, GOOGLE_RTT_COMPLETE_EVENT },
-		{ GOOGLE_OUI, GOOGLE_SCAN_COMPLETE_EVENT },
-		{ GOOGLE_OUI, GOOGLE_GSCAN_GEOFENCE_LOST_EVENT },
-		{ GOOGLE_OUI, GOOGLE_SCAN_EPNO_EVENT },
-		{ GOOGLE_OUI, GOOGLE_DEBUG_RING_EVENT },
-		{ GOOGLE_OUI, GOOGLE_FW_DUMP_EVENT },
-		{ GOOGLE_OUI, GOOGLE_PNO_HOTSPOT_FOUND_EVENT },
-		{ GOOGLE_OUI, GOOGLE_RSSI_MONITOR_EVENT },
-		{ GOOGLE_OUI, GOOGLE_MKEEP_ALIVE_EVENT },
-		{ BROADCOM_OUI, BRCM_VENDOR_EVENT_IDSUP_STATUS },
-		{ BROADCOM_OUI, BRCM_VENDOR_EVENT_DRIVER_HANG }
-};
-
 const struct nl80211_vendor_cmd_info brcmf_vendor_events[] = {
 	{
 		.vendor_id = BROADCOM_OUI,
 		.subcmd = BRCMF_VNDR_EVTS_PHY_TEMP,
 	},
+    {
+        .vendor_id = BROADCOM_OUI,
+        .subcmd = BRCM_VENDOR_EVENT_UNSPEC,
+    },
+    {
+        .vendor_id = BROADCOM_OUI,
+        .subcmd = BRCM_VENDOR_EVENT_PRIV_STR,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_GSCAN_SIGNIFICANT_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_GSCAN_GEOFENCE_FOUND_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_GSCAN_BATCH_SCAN_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_SCAN_FULL_RESULTS_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_RTT_COMPLETE_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_SCAN_COMPLETE_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_GSCAN_GEOFENCE_LOST_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_SCAN_EPNO_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_DEBUG_RING_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_FW_DUMP_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_PNO_HOTSPOT_FOUND_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_RSSI_MONITOR_EVENT,
+    },
+    {
+        .vendor_id = GOOGLE_OUI,
+        .subcmd = GOOGLE_MKEEP_ALIVE_EVENT,
+    },
+    {
+        .vendor_id = BROADCOM_OUI,
+        .subcmd = BRCM_VENDOR_EVENT_IDSUP_STATUS,
+    },
+    {
+        .vendor_id = BROADCOM_OUI,
+        .subcmd = BRCM_VENDOR_EVENT_DRIVER_HANG,
+    },
 };
 
 #if defined(CPTCFG_BRCMFMAC_ANDROID)
