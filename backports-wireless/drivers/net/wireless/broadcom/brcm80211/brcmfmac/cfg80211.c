@@ -8584,6 +8584,7 @@ struct brcmf_if *brcmf_cfg80211_register_if(struct device *dev,
 		err = -ENOMEM;
 		goto wiphy_fail;
 	}
+    wiphy->iface_combinations = NULL;
 	wiphy->bands[NL80211_BAND_2GHZ] = &brcmf_def_band_2ghz;
 	drvr = wiphy_priv(wiphy);
 	drvr->wiphy = wiphy;
@@ -8600,15 +8601,6 @@ struct brcmf_if *brcmf_cfg80211_register_if(struct device *dev,
 		err = -ENOMEM;
 		goto cfg_fail;
 	}
-<<<<<<< HEAD
-=======
-	wiphy->iface_combinations = NULL;
-	brcmf_setup_wiphy(wiphy, ifp);
-	wiphy->bands[NL80211_BAND_2GHZ] = &brcmf_def_band_2ghz;
-	drvr->android->wiphy = wiphy;
-
-	cfg = wiphy_priv(wiphy);
->>>>>>> e301ad8 (Fix wrong wiphy iface combinations on INSMOD_NO_FW)
 	cfg->wiphy = wiphy;
 	cfg->pub = drvr;
 	cfg->pm_state = BRCMF_CFG80211_PM_STATE_RESUMED;
