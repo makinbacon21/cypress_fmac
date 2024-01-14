@@ -1116,14 +1116,6 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 	{
 		{
 			.vendor_id = GOOGLE_OUI,
-			.subcmd = DEBUG_GET_MEM_DUMP
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = wl_cfgvendor_unsupported_feature
-	},
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
 			.subcmd = ANDR_WIFI_SUBCMD_TX_PWR_SCENARIO
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
@@ -1185,6 +1177,15 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 			WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.policy = VENDOR_CMD_RAW_DATA,
 		.doit = brcmf_cfg80211_andr_dbg_start_logging
+	},
+    {
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = DEBUG_GET_MEM_DUMP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+             WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = brcmf_cfg80211_andr_dbg_get_mem_dump
 	},
 	{
 		{
