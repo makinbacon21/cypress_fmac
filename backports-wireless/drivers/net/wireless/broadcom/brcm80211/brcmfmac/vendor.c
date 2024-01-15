@@ -1120,6 +1120,7 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 			.subcmd = ANDR_WIFI_SUBCMD_TX_PWR_SCENARIO
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+        .policy = VENDOR_CMD_RAW_DATA,
 		.doit = wl_cfgvendor_unsupported_feature
 	},
 	{
@@ -1128,6 +1129,7 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 			.subcmd = WIFI_SUBCMD_SET_LATENCY_MODE
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+        .policy = VENDOR_CMD_RAW_DATA,
 		.doit = wl_cfgvendor_unsupported_feature
 	},
 	{
@@ -1136,6 +1138,7 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 			.subcmd = DEBUG_SET_HAL_PID
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+        .policy = VENDOR_CMD_RAW_DATA,
 		.doit = wl_cfgvendor_unsupported_feature
 	},
 #endif /* CPTCFG_BRCMFMAC_NV_PRIV_CMD */
