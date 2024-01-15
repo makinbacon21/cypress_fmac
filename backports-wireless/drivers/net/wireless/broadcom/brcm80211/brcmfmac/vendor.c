@@ -1110,6 +1110,7 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			WIPHY_VENDOR_CMD_NEED_NETDEV,
+        .policy = VENDOR_CMD_RAW_DATA,
 		.doit = brcmf_cfg80211_start_mkeep_alive
 	},
 #ifdef CPTCFG_BRCMFMAC_NV_PRIV_CMD
@@ -1145,6 +1146,7 @@ const struct wiphy_vendor_command brcmf_vendor_cmds[] = {
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			WIPHY_VENDOR_CMD_NEED_NETDEV,
+        .policy = VENDOR_CMD_RAW_DATA,
 		.doit = brcmf_cfg80211_stop_mkeep_alive
 	},
 	{
